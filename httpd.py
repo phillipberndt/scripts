@@ -7,6 +7,7 @@ import os
 import subprocess
 import signal
 import StringIO
+import datetime
 import re
 
 # Define CGI handlers
@@ -36,6 +37,28 @@ def rewrite_url(path):
 						path = new_path + re.sub(rule_match.group(1), rule_match.group(2).replace("$", "\\"), match_against)
 	return path
 
+# Format a timestamp
+def format_timestamp(date_object):
+	return date_object.strftime("%a, %d %b %Y %H:%M:%S UTC")
+
+# Format HTTP Headers for output
+def headers(status, headers):
+	if type(headers) is str:
+		headers = headers.replace("\r\n", "\n")
+		if headers[:7] == "HTTP/1.":
+			status, headers = headers.split("\n", 1)
+		headers = dict(( (y[0].lower(), y[1]) for y in ( x.split(":", 1) for x in headers.split("\n") )))
+		if "status" in headers:
+			status = headers["status"]
+			del headers["status"]
+	else:
+		headers = dict(( (str(x[0]).lower(), str(x[1])) for x in headers.items() ))
+	if "date" not in headers:
+		headers["date"] = format_timestamp(datetime.datetime.utcnow())
+	headers["connection"] = "Close"
+	return status + "\r\n" + "\r\n".join(( str(x[0]).capitalize() + ": " + str(x[1]) for x in headers.items() )) + "\r\n\r\n"
+
+
 # Class for connection handling
 class Connection(object):
 	def __str__(self):
@@ -53,12 +76,20 @@ class Connection(object):
 		self.cgi_process = False
 		self.event_ids = []
 		self.hup_done = False
+		self.timeout_id = False
 
 		self.event_ids.append(glib.io_add_watch(self.socket, glib.IO_IN, lambda fd, cond: self.handle_incoming() or True))
 		self.event_ids.append(glib.io_add_watch(self.socket, glib.IO_HUP, lambda fd, cond: self.handle_hup() or True))
+		self.timeout_id = glib.timeout_add(30000, self.handle_timeout)
+	
+	def handle_timeout(self):
+		self.handle_hup()	
 
 	def handle_incoming(self):
-		self.data_cache += self.socket.recv(1024)
+		try:
+			self.data_cache += self.socket.recv(1024)
+		except:
+			self.handle_hup()
 		if self.data_cache == "":
 			# HUP
 			self.handle_hup()
@@ -97,6 +128,8 @@ class Connection(object):
 				if data == "":
 					# Finished. Handle request
 					self.state = 3
+					glib.source_remove(self.timeout_id)
+					self.timeout_id = False
 					self.handle_request()
 					break
 				header = data.split(":", 1)
@@ -109,7 +142,7 @@ class Connection(object):
 			if self.cgi_process:
 				self.cgi_process.stdin.write(self.data_cache)
 				self.data_cache = ""
-			return
+		return True
 
 	def handle_request(self):
 		print "[%s] %s" % (self, self.request_uri)
@@ -119,13 +152,13 @@ class Connection(object):
 			for index in ("index.html", "index.php", "index.pl", "index"):
 				new_path = os.path.join(path, index)
 				if os.access(new_path, os.F_OK):
-					self.socket.send("HTTP/1.1 301 Permanently redirected\r\nLocation: %s\r\nConnection: Close\r\n\r\n" % (os.path.join(self.request_file, index)))
+					self.socket.send(headers("HTTP/1.1 301 Permanently redirected", { "Location": os.path.join(self.request_file, index) }))
 					self.handle_hup()
 		if os.path.isdir(path):
 			# This is a directory.
 			# Redirect to a URL ending in a slash
 			if self.request_file and self.request_file[-1] != "/":
-				self.socket.send("HTTP/1.1 301 Permanently redirected\r\nLocation: %s/\r\nConnection: Close\r\n\r\n" % self.request_file)
+				self.socket.send(headers("HTTP/1.1 301 Permanently redirected", { "Location": self.request_file + "/" }))
 				self.handle_hup()
 				return
 			# Generate a directory listing
@@ -142,7 +175,14 @@ class Connection(object):
 					self.handle_hup()
 					return
 				self.socket.send(write)
-			self.socket.send("HTTP/1.1 200 Ok\nContent-Length: %d\nContent-Type: text/html; charset=utf-8\nConnection: Close\n\n" % (len(output_str)))
+			response_headers = {
+				"Content-Length": len(output_str),
+				"Content-Type": "text/html; charset=utf-8"
+			}
+			self.socket.send(headers("HTTP/1.1 200 Ok", response_headers)) 
+			if self.request_type == "HEAD":
+				self.handle_hup()
+				return
 			self.event_ids.append(glib.io_add_watch(self.socket, glib.IO_OUT, lambda fd, cond: send_data() or True))
 		elif os.access(path, os.F_OK):
 			# File exists.
@@ -151,18 +191,62 @@ class Connection(object):
 			if extension in cgi_handlers:
 				self.handle_cgi(cgi_handlers[extension] + " '" + path.replace("'", r"\'") + "'")
 				return
-			# Send it back to the user
+			# Send the file back to the user
 			response_file = open(path, "r")
 			mime_type, encoding = mimetypes.guess_type(path)
 			if not mime_type:
 				mime_type = "application/octet-stream"
-			self.socket.send("HTTP/1.1 200 Ok\nContent-Length: %d\nContent-Type: %s\nConnection: Close\n\n" % (os.stat(path).st_size, mime_type))
+			file_stat = os.stat(path)
+			# Check if-modified-since header
+			modification_time = datetime.datetime.utcfromtimestamp(file_stat.st_mtime)
+			if "if-modified-since" in self.request_headers:
+				try:
+					check_date = datetime.datetime.strptime(self.request_headers["if-modified-since"], "%a, %d %b %Y %H:%M:%S %Z")
+					if (modification_time - check_date).seconds == 0:
+						self.socket.send(headers("HTTP/1.1 304 Not modified", { "Last-Modified": format_timestamp(modification_time) }))
+						self.handle_hup()
+						return
+				except:
+					pass
+			# Take Range requests into account
+			content_length = [ file_stat.st_size ]
+			status = "HTTP/1.1 200 Ok"
+			if "range" in self.request_headers:
+				file_range_type, file_range_range = self.request_headers["range"].split("=", 1)
+				file_range_range = file_range_range.split("-", 1)
+				if file_range_type != "bytes" or len(file_range_range) != 2:
+					self.socket.send(headers("HTTP/1.1 416 Requested range not satisfiable", {}))
+					self.handle_hup()
+					return
+				file_range_range[0] = int(file_range_range[0]) if file_range_range[0].isdigit() else 0
+				file_range_range[1] = int(file_range_range[1]) if file_range_range[1].isdigit() else file_stat.st_size
+				if file_range_range[0] < 0 or file_range_range[0] >= file_range_range[1] or file_range_range[1] > file_stat.st_size:
+					self.socket.send(headers("HTTP/1.1 416 Requested range not satisfiable", {}))
+					self.handle_hup()
+					return
+				content_length[0] = file_range_range[1] - file_range_range[0]
+				response_file.seek(file_range_range[0])
+				status = "HTTP/1.1 206 Partial Content"
+			response_headers = {
+				"Content-Length": content_length[0],
+				"Last-Modified": format_timestamp(modification_time),
+				"Content-Type": mime_type
+			}
+			self.socket.send(headers(status, response_headers))
 			def send_data():
-				data = response_file.read(1024 * 512)
+				to_read = 1024 * 512 if content_length[0] > 1024 * 512 else content_length[0]
+				content_length[0] -= to_read
+				data = response_file.read(to_read)
 				if not data:
 					self.handle_hup()
 					return
 				self.socket.send(data)
+				if content_length[0] == 0:
+					self.handle_hup()
+					return
+			if self.request_type == "HEAD":
+				self.handle_hup()
+				return
 			self.event_ids.append(glib.io_add_watch(self.socket, glib.IO_OUT, lambda fd, cond: send_data() or True))
 		else:
 			self.reply_error(404)
@@ -188,18 +272,25 @@ class Connection(object):
 		for header in self.request_headers:
 			environ["HTTP_%s" % header.upper().replace("-", "_")] = self.request_headers[header]
 		self.cgi_process = subprocess.Popen(executable, close_fds=True, shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=environ)
-		self.cgi_sent_header = False
+		self.cgi_sent_header = ""
 		def send_data():
 			data = self.cgi_process.stdout.read(1024 * 512)
-			if not self.cgi_sent_header and data[:5] != "HTTP/":
-				if data[:8] == "Status: ":
-					data = "HTTP/1.1 " + data[8:]
+			if type(self.cgi_sent_header) is str:
+				self.cgi_sent_header += data
+				if "\r\n\r\n" in data:
+					response_headers, data = self.cgi_sent_header.split("\r\n\r\n", 1)
+					self.socket.send(headers("HTTP/1.1 200 Ok", response_headers))
+					self.cgi_sent_header = True
+				elif "\n\n" in data:
+					response_headers, data = self.cgi_sent_header.split("\r\n\r\n", 1)
+					self.socket.send(headers("HTTP/1.1 200 Ok", response_headers))
+					self.cgi_sent_header = True
 				else:
-					self.socket.send("HTTP/1.1 200 Ok\r\n")
-			self.cgi_sent_header = True
+					return True
 			self.socket.send(data)
 			if self.cgi_process.poll() != None:
 				self.handle_hup()
+			return True
 		self.event_ids.append(glib.io_add_watch(self.cgi_process.stdout, glib.IO_IN | glib.IO_HUP | glib.IO_ERR, lambda fd, cond: send_data() or True))
 		def child_terminated():
 			self.handle_hup()
@@ -213,6 +304,8 @@ class Connection(object):
 		if self.hup_done:
 			return
 		self.hup_done = True
+		if self.timeout_id != False:
+			glib.source_remove(self.timeout_id)
 		if self.cgi_process:
 			try:
 				self.cgi_process.terminate()
