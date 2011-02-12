@@ -78,19 +78,6 @@ class Connection(object):
 		self._restart_handlers(30)
 		Connection.instances += 1
 	
-	def __del__(self):
-		Connection.instances -= 1
-		if self.timeout_id != False:
-			glib.source_remove(self.timeout_id)
-		if self.cgi_process:
-			try:
-				self.cgi_process.terminate()
-			except:
-				pass
-		self.socket.close()
-		for eid in self.event_ids:
-			glib.source_remove(eid)
-	
 	def _restart_handlers(self, timeout):
 		self.state = 1
 		self.request_headers = {}
@@ -409,6 +396,17 @@ class Connection(object):
 
 	# Close the connection
 	def handle_hup(self):
+		Connection.instances -= 1
+		if self.timeout_id != False:
+			glib.source_remove(self.timeout_id)
+		if self.cgi_process:
+			try:
+				self.cgi_process.terminate()
+			except:
+				pass
+		self.socket.close()
+		for eid in self.event_ids:
+			glib.source_remove(eid)
 		del self
 
 # Trap sigint
