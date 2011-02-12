@@ -1,0 +1,32 @@
+iwebd - Instant web daemons
+
+The idea of this project is to provide people with network daemons for development
+purposes and ad-hoc use. If you need an httpd, simply run
+ ihttpd <port>
+and you'll have one.
+
+All code in this repository is licensed under the GNU GENERAL PUBLIC LICENSE, Version 3
+Available at http://www.gnu.org/licenses/gpl-3.0.html
+If you don't agree to those terms and/or can't obtain a copy of the license you
+may not use or redistribute this program.
+
+Currently, this project consists of:
+
+* ihttpd - An instant httpd
+  
+  Features:
+   * CGI
+   * Keep-Alive
+   * Range'd requests
+   * Scalability (does not use threads or multiple processes, relies on select() instead)
+   * mod_rewrite support (does not support RewriteCond; only used for otherwise non-existant files)
+
+  ihttpd only supports a subset of HTTP 1.1
+
+* iftpd - An instant ftpd
+
+  Features:
+   * Authentication
+   * Read and write support
+   * Announces itself to the local network via Avahi
+   * Nearly full ftp protocol support

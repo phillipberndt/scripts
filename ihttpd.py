@@ -15,7 +15,7 @@ import re
 	For testing purposes
 
 	Start using
-	 python httpd.py <port>
+	 python ihttpd.py <port>
 	
 	It will serve files from the current directory and below.
 	It has support for a limited subset of HTTP only!
@@ -324,7 +324,7 @@ class Connection(object):
 	def handle_cgi(self, executable):
 		environ = os.environ.copy()
 		environ.update({
-			"SERVER_SOFTWARE": "httpd",
+			"SERVER_SOFTWARE": "ihttpd",
 			"SERVER_NAME": self.request_headers["host"] if "Host" in self.request_headers else "",
 			"GATEWAY_INTERFACE": "CGI/1.1",
 			"SERVER_PROTOCOL": "HTTP/1.1",
