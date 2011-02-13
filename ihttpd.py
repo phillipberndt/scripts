@@ -99,7 +99,7 @@ class Connection(object):
 				status, headers = headers.split("\n", 1)
 			headers = dict(( (y[0].lower(), y[1]) for y in ( x.split(":", 1) for x in headers.split("\n") )))
 			if "status" in headers:
-				status = headers["status"]
+				status = "HTTP/1.1 " + headers["status"].strip()
 				del headers["status"]
 		else:
 			headers = dict(( (str(x[0]).lower(), str(x[1])) for x in headers.items() ))
