@@ -367,7 +367,10 @@ class Connection(object):
 		})
 		for header in self.request_headers:
 			environ["HTTP_%s" % header.upper().replace("-", "_")] = self.request_headers[header]
-		self.cgi_process = subprocess.Popen(argv, close_fds=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=environ)
+		def pre_exec_handler():
+			# Ignore interrupt signal
+			signal.signal(signal.SIGINT, signal.SIG_IGN)
+		self.cgi_process = subprocess.Popen(argv, close_fds=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=environ, preexec_fn=pre_exec_handler)
 		self.cgi_sent_header = ""
 		def send_data():
 			data = self.cgi_process.stdout.read(1024 * 512)
@@ -474,16 +477,16 @@ def terminate_server(signum, frame):
 		termination_requested = 2
 		return
 	elif termination_requested == 2:
+		os.killpg(0, signal.SIGTERM)
 		sys.exit(0)
 	termination_requested = 1
 	if Connection.instances > 0:
 		print "\rReceived signal. Waiting for remaining connections to close.."
-		print "Active CGI handlers have already been killed."
 		print "Send again to force quit"
 		server_socket.close()
 		def watch():
 			if Connection.instances == 0:
-				print "\033[3A\033[J", # Remove those three lines above
+				print "\033[2A\033[J", # Remove those three lines above
 				sys.exit(0)
 			return True
 		glib.idle_add(watch)
@@ -512,3 +515,5 @@ def create_connection():
 	Connection(socket, ip)
 glib.io_add_watch(server_socket, glib.IO_IN, lambda fd, cond: create_connection() or True)
 main_loop.run()
+# When the main loop has been left, kill all remaining children
+os.killpg(0, signal.SIGTERM)
