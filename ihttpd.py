@@ -276,7 +276,10 @@ class Connection(object):
 				all_icons = gtk.icon_theme_get_default().list_icons()
 			for my_file in filter(lambda x: x[0] != ".", sorted(os.listdir(path))):
 				joined = os.path.join(path, my_file)
-				stat = os.stat(joined)
+				try:
+					stat = os.stat(joined)
+				except:
+					continue
 				escaped = my_file.replace('"', '&quot;').replace('<', '&lt;')
 				# Load size/date
 				size_str = stat.st_size
@@ -294,7 +297,7 @@ class Connection(object):
 					joined += "/"
 				# Load icon
 				if has_gtk:
-					icon = filter(lambda x: x in all_icons, gio.content_type_get_icon(gio.content_type_guess(joined, None, stat.st_size)[0]).get_names())
+					icon = filter(lambda x: x in all_icons, gio.content_type_get_icon(gio.content_type_guess(joined, None, min(stat.st_size, 2**16 - 1))[0]).get_names())
 					if len(icon) > 0:
 						icon = '<img src="' + self.request_file + "?" + icon[0] + '">'
 					else:
