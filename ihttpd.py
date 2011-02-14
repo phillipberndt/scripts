@@ -2,13 +2,22 @@
 import glib
 import socket
 import sys
-import mimetypes
 import os
 import subprocess
 import signal
 import StringIO
 import datetime
+import base64
+import mimetypes
 import re
+
+# GTK for file icon generation
+has_gtk = False
+try:
+	import gio, gtk
+	has_gtk = True
+except:
+	pass
 
 """
 	A simple HTTP daemon
@@ -112,6 +121,19 @@ class Connection(object):
 		else:
 			headers["connection"] = "Keep-Alive"
 		return status + "\r\n" + "\r\n".join(( str(x[0]).capitalize() + ": " + str(x[1]) for x in headers.items() )) + "\r\n\r\n"
+	
+	# Generate HTTP-head section
+	def _gen_head(self, title):
+		return "<head><meta charset='utf-8'><title>" + title + """</title>
+			<style type="text/css">
+				body { font-family: sans-serif; }
+				td, th { padding: 5px; text-align: left; vertical-align: middle; }
+				td img { border: none; }
+				th + th { font-weight: normal; }
+				td + td { min-width: 300px; }
+				td + td + td { min-width: inherit; }
+			</style>
+			</head>"""
 
 	def handle_timeout(self):
 		self.reply_error(408)
@@ -219,6 +241,22 @@ class Connection(object):
 					self.handle_finished()
 		if os.path.isdir(path):
 			# This is a directory.
+			# Generate images for files if requested
+			if self.request_query and has_gtk:
+				try:
+					output = StringIO.StringIO()
+					def send_data(buf, data=None):
+						output.write(buf)
+						return True
+					gtk.icon_theme_get_default().load_icon(self.request_query, 32, 0).save_to_callback(send_data, "png", {}, None)
+					self.socket.send(self._headers("HTTP/1.1 200 Ok", { "Content-Type": "image/png", "Content-Length": output.len }))
+					output.seek(0)
+					self.socket.send(output.buf)
+					self.handle_finished()
+				except:
+					self.reply_error(404)
+				return
+
 			# Redirect to a URL ending in a slash
 			if self.request_file and self.request_file[-1] != "/":
 				try:
@@ -229,12 +267,42 @@ class Connection(object):
 				self.handle_finished()
 				return
 			# Generate a directory listing
-			output_str = "<!DOCTYPE HTML><body><h1>Directory Listing for %s</h1><ul>" % (self.request_file.replace("<", "&lt;"))
-			for my_file in ( x.replace('"', "&quot;").replace("<", "&amp;") for x in os.listdir(path) if x[0] != "." ):
-				if os.path.isdir(os.path.join(path, my_file)):
-					my_file += "/"
-				output_str += '<li><a href="%s">%s</a></li>' % (my_file, my_file)
-			output_str += "</ul></body>"
+			output_str = ("<!DOCTYPE HTML>%s<body><h1>Directory Listing for %s</h1>") % (self._gen_head("Directory Listing for " +
+				self.request_file.replace("<", "&lt;")), self.request_file.replace("<", "&lt;"))
+			if self.request_file != "/":
+				output_str += "<p><a href='../'>Back to parent directory</a></p>"
+			output_str += "<table><tr><td></td><th>File Name</th><th>File Size</th><th>Last modified</th></tr>"
+			if has_gtk:
+				all_icons = gtk.icon_theme_get_default().list_icons()
+			for my_file in filter(lambda x: x[0] != ".", sorted(os.listdir(path))):
+				joined = os.path.join(path, my_file)
+				stat = os.stat(joined)
+				escaped = my_file.replace('"', '&quot;').replace('<', '&lt;')
+				# Load size/date
+				size_str = stat.st_size
+				if size_str > 1024 ** 3:
+					size_str = str(round(size_str / 1024 ** 3, 2)) + " GB"
+				elif size_str > 1024 ** 2:
+					size_str = str(round(size_str / 1024 ** 2, 2)) + " MB"
+				elif size_str > 1024:
+					size_str = str(round(size_str / 1024, 2)) + " kB"
+				else:
+					size_str = str(size_str) + " Bytes"
+				date_str = datetime.datetime.utcfromtimestamp(stat.st_mtime).strftime("%m-%d-%Y %H:%M:%S")
+				if os.path.isdir(joined):
+					escaped += "/"
+					joined += "/"
+				# Load icon
+				if has_gtk:
+					icon = filter(lambda x: x in all_icons, gio.content_type_get_icon(gio.content_type_guess(joined, None, stat.st_size)[0]).get_names())
+					if len(icon) > 0:
+						icon = '<img src="' + self.request_file + "?" + icon[0] + '">'
+					else:
+						icon = ""
+				else:
+					icon = ""
+				output_str += '<tr><td>%s</td><td><a href="%s">%s</a></td><td>%s</td><td>%s</td></tr>' % (icon, escaped, escaped, size_str, date_str)
+			output_str += "</table></body>"
 			output = StringIO.StringIO(output_str)
 			def send_data():
 				write = output.read(1024 * 512)
@@ -268,9 +336,15 @@ class Connection(object):
 				return
 			# Send the file back to the user
 			response_file = open(path, "r")
-			mime_type, encoding = mimetypes.guess_type(path)
-			if not mime_type:
-				mime_type = "application/octet-stream"
+
+			# GTK has better mime-type guessing
+			if has_gtk:
+				mime_type = gio.content_type_get_mime_type(gio.content_type_guess(path))
+			else:
+				mime_type, encoding = mimetypes.guess_type(path)
+				if not mime_type:
+					mime_type = "application/octet-stream"
+
 			file_stat = os.stat(path)
 			# Check if-modified-since header
 			modification_time = datetime.datetime.utcfromtimestamp(file_stat.st_mtime)
@@ -422,7 +496,9 @@ class Connection(object):
 		else:
 			err_str = "Generic error"
 		try:
-			self.socket.send("HTTP/1.1 %d %s\r\nContent-Type: text/plain\r\n\r\nFailed to handle your request. %s" % (err_no, err_str, err_str))
+			self.socket.send(self._headers("HTTP/1.1 %d %s" % (err_no, err_str), { "Content-Type": "text/html; charset=utf8" }) +
+				"<!DOCTYPE HTML>" + self._gen_head("Failed to handle your request") + "<body><h1>Failed to handle your request</h1><p>" +
+				err_str + "</p>")
 		except:
 			self.handle_hup()
 			return
@@ -446,8 +522,8 @@ class Connection(object):
 					pass
 			for eid in self.event_ids:
 				glib.source_remove(eid)
-			# Reset, with shorter Timeout
-			self._restart_handlers(2)
+			# Reset
+			self._restart_handlers(30)
 			# Check if there is data to process
 			if self.data_cache:
 				self.handle_incoming(False)

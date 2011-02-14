@@ -22,6 +22,7 @@ Currently, this project consists of:
    * mod_rewrite support (does not support RewriteCond; only used for otherwise non-existant files)
 
   ihttpd only supports a subset of HTTP 1.1
+  ihttpd uses icons from the crystal KDE theme by Everaldo Coelho, licensed under the LGPL.
 
 * iftpd - An instant ftpd
 
