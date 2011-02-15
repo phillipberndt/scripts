@@ -5,11 +5,16 @@ import sys
 import os
 import subprocess
 import signal
-import StringIO
+try:
+	import cStringIO as StringIO
+except:
+	import StringIO
 import datetime
 import base64
 import mimetypes
 import re
+import time
+import wsgiref.handlers
 
 # GTK for file icon generation
 has_gtk = False
@@ -69,7 +74,7 @@ def rewrite_url(path):
 
 # Format a timestamp
 def format_timestamp(date_object):
-	return date_object.strftime("%a, %d %b %Y %H:%M:%S UTC")
+	return wsgiref.handlers.format_date_time(time.mktime(date_object.timetuple()))
 
 # Class for connection handling
 class Connection(object):
@@ -401,10 +406,16 @@ class Connection(object):
 			except:
 				self.handle_hup()
 				return
+			cache = StringIO.StringIO()
 			def send_data():
-				to_read = 1024 * 512 if content_length[0] > 1024 * 512 else content_length[0]
-				content_length[0] -= to_read
-				data = response_file.read(to_read)
+				data = cache.read(1024 * 512)
+				if not data:
+					to_read = 10 * 1024 ** 2 if content_length[0] > 10 * 1024 ** 2 else content_length[0]
+					content_length[0] -= to_read
+					cache.truncate(0)
+					cache.write(response_file.read(to_read))
+					cache.seek(0)
+					data = cache.read(1024 * 512)
 				if not data:
 					self.handle_finished()
 					return
@@ -412,9 +423,6 @@ class Connection(object):
 					self.socket.send(data)
 				except:
 					self.handle_hup()
-					return
-				if content_length[0] == 0:
-					self.handle_finished()
 					return
 			if self.request_type == "HEAD":
 				self.handle_finished()
