@@ -101,6 +101,7 @@ class Connection(object):
 		self.event_ids = []
 		self.timeout_id = False
 		self.allow_keep_alive = True
+		self.latest_header = False
 		self.event_ids.append(glib.io_add_watch(self.socket, glib.IO_IN, lambda fd, cond: self.handle_incoming() or True))
 		self.event_ids.append(glib.io_add_watch(self.socket, glib.IO_HUP, lambda fd, cond: self.handle_hup() or True))
 		self.timeout_id = glib.timeout_add(timeout * 1000, self.handle_timeout)
@@ -209,11 +210,18 @@ class Connection(object):
 					# Handle request
 					self.handle_request()
 					break
-				header = data.split(":", 1)
-				if len(header) != 2:
-					self.reply_error(400)
-					return True
-				self.request_headers[header[0].lower()] = header[1].strip()
+				if data[0] in (" ", "\t"):
+					if self.latest_header:
+						self.request_headers[self.latest_header] += "\n" + data.strip()
+					else:
+						self.reply_error(400)
+				else:
+					header = data.split(":", 1)
+					if len(header) != 2:
+						self.reply_error(400)
+						return True
+					self.latest_header = header[0].lower()
+					self.request_headers[self.latest_header] = header[1].strip()
 				if len(self.request_headers) > 100:
 					self.reply_error(507)
 					return True
