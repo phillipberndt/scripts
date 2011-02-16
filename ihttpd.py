@@ -221,7 +221,10 @@ class Connection(object):
 						self.reply_error(400)
 						return True
 					self.latest_header = header[0].lower()
-					self.request_headers[self.latest_header] = header[1].strip()
+					if self.latest_header in self.request_headers:
+						self.request_headers[self.latest_header] += ", " + header[1].strip()
+					else:
+						self.request_headers[self.latest_header] = header[1].strip()
 				if len(self.request_headers) > 100:
 					self.reply_error(507)
 					return True
