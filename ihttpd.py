@@ -366,6 +366,11 @@ class Connection(object):
 				mime_type, encoding = mimetypes.guess_type(path)
 				if not mime_type:
 					mime_type = "application/octet-stream"
+			
+			# If this mime type is text and the client does not accept is, send file as text/plain to
+			# have it displayed
+			if mime_type[:5] == "text/" and "accept" in self.request_headers and mime_type not in map(lambda x: x.strip(), self.request_headers["accept"].split(",")):
+				mime_type = "text/plain; exact-type=" + mime_type
 
 			file_stat = os.stat(path)
 			# Check if-modified-since header
