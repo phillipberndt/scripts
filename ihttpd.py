@@ -231,7 +231,25 @@ class Connection(object):
 
 	# Hande an actual request
 	def handle_request(self):
+		# Handle virtual paths, especially directory icons
+		if self.request_file[:23] == "/iwebd-directory-icons/" and has_gtk:
+			try:
+				output = StringIO.StringIO()
+				def send_data(buf, data=None):
+					output.write(buf)
+					return True
+				gtk.icon_theme_get_default().load_icon(self.request_file[23:], 32, 0).save_to_callback(send_data, "png", {}, None)
+				self.socket.send(self._headers("HTTP/1.1 200 Ok", { "Content-Type": "image/png", "Content-Length": output.tell(), "Expires": 
+					"Mon, 15 Apr 2030 20:00:00 GMT" }))
+				self.socket.send(output.getvalue())
+				self.handle_finished()
+			except:
+				self.reply_error(404)
+			return
+
+		# Log all requests for "real" files / directories
 		print "[%s] %s" % (self, self.request_uri)
+		
 		path = os.path.abspath(os.path.join(os.getcwd(), "./" + self.request_file))
 		if os.path.isdir(path):
 			# Search for directory index
@@ -246,22 +264,6 @@ class Connection(object):
 					self.handle_finished()
 		if os.path.isdir(path):
 			# This is a directory.
-			# Generate images for files if requested
-			if self.request_query and has_gtk:
-				try:
-					output = StringIO.StringIO()
-					def send_data(buf, data=None):
-						output.write(buf)
-						return True
-					gtk.icon_theme_get_default().load_icon(self.request_query, 32, 0).save_to_callback(send_data, "png", {}, None)
-					self.socket.send(self._headers("HTTP/1.1 200 Ok", { "Content-Type": "image/png", "Content-Length": output.len }))
-					output.seek(0)
-					self.socket.send(output.buf)
-					self.handle_finished()
-				except:
-					self.reply_error(404)
-				return
-
 			# Redirect to a URL ending in a slash
 			if self.request_file and self.request_file[-1] != "/":
 				try:
@@ -271,6 +273,7 @@ class Connection(object):
 					return
 				self.handle_finished()
 				return
+
 			# Generate a directory listing
 			output_str = ("<!DOCTYPE HTML>%s<body><h1>Directory Listing for %s</h1>") % (self._gen_head("Directory Listing for " +
 				self.request_file.replace("<", "&lt;")), self.request_file.replace("<", "&lt;"))
@@ -304,7 +307,7 @@ class Connection(object):
 				if has_gtk:
 					icon = filter(lambda x: x in all_icons, gio.content_type_get_icon(gio.content_type_guess(joined, None, min(stat.st_size, 2**16 - 1))[0]).get_names())
 					if len(icon) > 0:
-						icon = '<img src="' + self.request_file + "?" + icon[0] + '">'
+						icon = '<img src="/iwebd-directory-icons/' + icon[0] + '">'
 					else:
 						icon = ""
 				else:
