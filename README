@@ -20,9 +20,9 @@ Currently, this project consists of:
    * Range'd requests
    * Scalability (does not use threads or multiple processes, relies on select() instead)
    * mod_rewrite support (does not support RewriteCond; only used for otherwise non-existant files)
+   * Uses icons from XDG icon theme in directory listings, if X and pygtk are available
 
   ihttpd only supports a subset of HTTP 1.1
-  ihttpd uses icons from the crystal KDE theme by Everaldo Coelho, licensed under the LGPL.
 
 * iftpd - An instant ftpd
 
