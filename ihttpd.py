@@ -70,6 +70,9 @@ def rewrite_url(path):
 						match_against = match_against[1:]
 					if re.match(rule_match.group(1), match_against):
 						path = new_path + re.sub(rule_match.group(1), rule_match.group(2).replace("$", "\\"), match_against)
+						if "?" in match_against and "?" in rule_match.group(2):
+							components = path.split("?", 2)
+							path = components[0] + "?" + components[1] + "&" + components[2]
 	return path
 
 # Format a timestamp
