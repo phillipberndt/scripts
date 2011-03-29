@@ -48,7 +48,8 @@ except:
 # Define CGI handlers
 cgi_handlers = {
 	"php": "/usr/bin/php5-cgi",
-	"pl": "/usr/bin/perl"
+	"pl": "/usr/bin/perl",
+	"py": "/usr/bin/python"
 }
 
 # URL rewriting
@@ -372,7 +373,7 @@ class Connection(object):
 			
 			# If this mime type is text and the client does not accept is, send file as text/plain to
 			# have it displayed
-			if mime_type[:5] == "text/" and "accept" in self.request_headers and mime_type not in map(lambda x: x.strip(), self.request_headers["accept"].split(",")):
+			if mime_type[:5] == "text/" and "accept" in self.request_headers and mime_type not in map(lambda x: x.strip().split(";")[0], self.request_headers["accept"].split(",")):
 				mime_type = "text/plain; exact-type=" + mime_type
 
 			file_stat = os.stat(path)
