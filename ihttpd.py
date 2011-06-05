@@ -14,6 +14,7 @@ import base64
 import mimetypes
 import re
 import time
+import fcntl
 import wsgiref.handlers
 
 # GTK for file icon generation
@@ -90,6 +91,7 @@ class Connection(object):
 	def __init__(self, socket, ip):
 		self.socket = socket
 		self.socket_fileno = socket.fileno()
+		fcntl.fcntl(self.socket_fileno, fcntl.F_SETFL, fcntl.fcntl(self.socket_fileno, fcntl.F_GETFL) | os.O_NONBLOCK)
 		self.remote_addr = ip
 		self.data_cache = ""
 		self.hup_done = False
@@ -491,6 +493,8 @@ class Connection(object):
 			# Ignore interrupt signal
 			signal.signal(signal.SIGINT, signal.SIG_IGN)
 		self.cgi_process = subprocess.Popen(argv, close_fds=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=environ, preexec_fn=pre_exec_handler)
+		fcntl.fcntl(self.cgi_process.stdout.fileno(), fcntl.F_SETFL, fcntl.fcntl(self.cgi_process.stdout.fileno(), fcntl.F_GETFL) | os.O_NONBLOCK)
+
 		self.cgi_sent_header = ""
 		def send_data():
 			data = self.cgi_process.stdout.read(1024 * 512)
@@ -516,7 +520,10 @@ class Connection(object):
 					return True
 			try:
 				if self.do_chunk:
+					if len(data) == 0:
+						return True
 					self.socket.send(hex(len(data))[2:] + "\r\n")
+				# TODO Make this non-blocking?!
 				self.socket.send(data)
 				if self.do_chunk:
 					self.socket.send("\r\n")
