@@ -524,7 +524,9 @@ class Connection(object):
 				self.handle_hup()
 				return
 			if self.cgi_process.poll() != None:
-				self.socket.send("0\r\n\r\n")
+				if self.do_chunk:
+					self.socket.send("0\r\n\r\n")
+					self.do_chunk = False
 				self.handle_finished()
 			return True
 		self.event_ids.append(glib.io_add_watch(self.cgi_process.stdout, glib.IO_IN | glib.IO_HUP | glib.IO_ERR, lambda fd, cond: send_data() or True))
@@ -560,6 +562,9 @@ class Connection(object):
 
 	# Reset the state when a request was processed
 	def handle_finished(self):
+		if self.do_chunk:
+			self.socket.send("0\r\n\r\n")
+			self.do_chunk = False
 		if not self.allow_keep_alive:
 			self.handle_hup()
 		else:
