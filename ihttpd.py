@@ -105,6 +105,7 @@ class Connection(object):
 		self.event_ids = []
 		self.timeout_id = False
 		self.allow_keep_alive = True
+		self.do_chunk = False
 		self.latest_header = False
 		self.event_ids.append(glib.io_add_watch(self.socket, glib.IO_IN, lambda fd, cond: self.handle_incoming() or True))
 		self.event_ids.append(glib.io_add_watch(self.socket, glib.IO_HUP, lambda fd, cond: self.handle_hup() or True))
@@ -124,8 +125,17 @@ class Connection(object):
 			headers = dict(( (str(x[0]).lower(), str(x[1]).strip()) for x in headers.items() ))
 		if "date" not in headers:
 			headers["date"] = format_timestamp(datetime.datetime.utcnow())
-		if "content-length" not in headers:
-			self.allow_keep_alive = False
+		status_code = re.search("[0-9]{3}", status)
+		if status_code:
+			status_code = int(status_code.group(0))
+		else:
+			status_code = 500
+		if "content-length" not in headers and status_code < 300:
+			if "transfer-encoding" in headers and "transfer-encoding" != "chunked":
+				self.allow_keep_alive = False
+			else:
+				headers["transfer-encoding"] = "chunked"
+				self.do_chunk = True
 		if not self.allow_keep_alive:
 			headers["connection"] = "Close"
 		else:
@@ -146,7 +156,8 @@ class Connection(object):
 			</head>"""
 
 	def handle_timeout(self):
-		self.reply_error(408)
+		# Apache does not send this so we don't do that either
+		# self.reply_error(408)
 		self.handle_hup()
 
 	# Receive incoming data and process it
@@ -272,17 +283,18 @@ class Connection(object):
 				new_path = os.path.join(path, index)
 				if os.access(new_path, os.F_OK):
 					try:
-						self.socket.send(self._headers("HTTP/1.1 301 Permanently redirected", { "Location": os.path.join(self.request_file, index) }))
+						self.socket.send(self._headers("HTTP/1.1 301 Permanently redirected", { "Content-Length": "0", "Location": os.path.join(self.request_file, index) }))
 					except:
 						self.handle_hup()
 						return
 					self.handle_finished()
+					return
 		if os.path.isdir(path):
 			# This is a directory.
 			# Redirect to a URL ending in a slash
 			if self.request_file and self.request_file[-1] != "/":
 				try:
-					self.socket.send(self._headers("HTTP/1.1 301 Permanently redirected", { "Location": self.request_file + "/" }))
+					self.socket.send(self._headers("HTTP/1.1 301 Permanently redirected", { "Content-Length": "0", "Location": self.request_file + "/" }))
 				except:
 					self.handle_hup()
 					return
@@ -459,7 +471,7 @@ class Connection(object):
 		environ = os.environ.copy()
 		environ.update({
 			"SERVER_SOFTWARE": "ihttpd",
-			"SERVER_NAME": self.request_headers["host"] if "Host" in self.request_headers else "",
+			"SERVER_NAME": self.request_headers["host"] if "host" in self.request_headers else "", # TODO Php does not like that?!
 			"GATEWAY_INTERFACE": "CGI/1.1",
 			"SERVER_PROTOCOL": "HTTP/1.1",
 			"SERVER_PORT": str(server_port),
@@ -503,11 +515,16 @@ class Connection(object):
 				else:
 					return True
 			try:
+				if self.do_chunk:
+					self.socket.send(hex(len(data))[2:] + "\r\n")
 				self.socket.send(data)
+				if self.do_chunk:
+					self.socket.send("\r\n")
 			except:
 				self.handle_hup()
 				return
 			if self.cgi_process.poll() != None:
+				self.socket.send("0\r\n\r\n")
 				self.handle_finished()
 			return True
 		self.event_ids.append(glib.io_add_watch(self.cgi_process.stdout, glib.IO_IN | glib.IO_HUP | glib.IO_ERR, lambda fd, cond: send_data() or True))
