@@ -91,7 +91,6 @@ class Connection(object):
 	def __init__(self, socket, ip):
 		self.socket = socket
 		self.socket_fileno = socket.fileno()
-		fcntl.fcntl(self.socket_fileno, fcntl.F_SETFL, fcntl.fcntl(self.socket_fileno, fcntl.F_GETFL) | os.O_NONBLOCK)
 		self.remote_addr = ip
 		self.data_cache = ""
 		self.hup_done = False
@@ -450,13 +449,15 @@ class Connection(object):
 					to_read = 10 * 1024 ** 2 if content_length[0] > 10 * 1024 ** 2 else content_length[0]
 					content_length[0] -= to_read
 					cache.truncate(0)
-					cache.write(response_file.read(to_read))
+					data = response_file.read(to_read)
+					cache.write(data)
 					cache.seek(0)
 					data = cache.read(1024 * 512)
 				if not data:
 					self.handle_finished()
 					return
 				try:
+					# TODO
 					self.socket.send(data)
 				except:
 					self.handle_hup()
