@@ -65,7 +65,7 @@ def rewrite_url(path):
 				if base_match:
 					basedir = base_match.group(1)
 				# TODO Support for flags, conditions
-				rule_match = re.match("\s*RewriteRule\s+(\S+)\s+(\S+).+", line)
+				rule_match = re.match("\s*RewriteRule\s+(\S+)\s+(\S+).*", line)
 				if rule_match:
 					match_against = path[len(basedir):] if path[:len(basedir)] == basedir else path
 					if match_against and match_against[0] == "/":
@@ -113,35 +113,50 @@ class Connection(object):
 		self.timeout_id = glib.timeout_add(timeout * 1000, self.handle_timeout)
 
 	# Format HTTP Headers for output. Has side-effects!
-	def _headers(self, status, headers):
-		if type(headers) is str:
-			headers = headers.replace("\r\n", "\n")
-			if headers[:7] == "HTTP/1.":
-				status, headers = headers.split("\n", 1)
-			headers = dict(( (y[0].lower(), y[1].strip()) for y in ( x.split(":", 1) for x in headers.split("\n") )))
+	def _headers(self, status, input_headers):
+		if type(input_headers) is str:
+			input_headers = input_headers.replace("\r\n", "\n")
+			if input_headers[:7] == "HTTP/1.":
+				status, input_headers = input_headers.split("\n", 1)
+			headers = {}
+			for key, value in (( (y[0].lower(), y[1].strip()) for y in ( x.split(":", 1) for x in input_headers.split("\n") ))):
+				if key in headers:
+					headers[key] += [ value ]
+				else:
+					headers[key] = [ value ]
 			if "status" in headers:
-				status = "HTTP/1.1 " + headers["status"]
+				status = "HTTP/1.1 " + headers["status"][0]
 				del headers["status"]
 		else:
-			headers = dict(( (str(x[0]).lower(), str(x[1]).strip()) for x in headers.items() ))
+			headers = {}
+			for key, value in (( (str(x[0]).lower(), str(x[1]).strip()) for x in input_headers.items() )):
+				if key in headers:
+					headers[key] += [ value ]
+				else:
+					headers[key] = [ value ]
 		if "date" not in headers:
-			headers["date"] = format_timestamp(datetime.datetime.utcnow())
+			headers["date"] = [ format_timestamp(datetime.datetime.utcnow()) ]
 		status_code = re.search("[0-9]{3}", status)
 		if status_code:
 			status_code = int(status_code.group(0))
 		else:
 			status_code = 500
-		if "content-length" not in headers and status_code < 300:
-			if "transfer-encoding" in headers and "transfer-encoding" != "chunked":
+		if "content-length" not in headers:
+			if "transfer-encoding" in headers and "chunked" not in headers["transfer-encoding"]:
 				self.allow_keep_alive = False
 			else:
-				headers["transfer-encoding"] = "chunked"
+				headers["transfer-encoding"] = [ "chunked" ]
 				self.do_chunk = True
 		if not self.allow_keep_alive:
-			headers["connection"] = "Close"
+			headers["connection"] = [ "Close" ]
 		else:
-			headers["connection"] = "Keep-Alive"
-		return status + "\r\n" + "\r\n".join(( str(x[0]).capitalize() + ": " + str(x[1]) for x in headers.items() )) + "\r\n\r\n"
+			headers["connection"] = [ "Keep-Alive" ]
+		retval = status + "\r\n"
+		for header, values in headers.items():
+			for value in values:
+				retval += header.capitalize() + ": " + str(value) + "\r\n"
+		retval += "\r\n"
+		return retval
 	
 	# Generate HTTP-head section
 	def _gen_head(self, title):
@@ -223,6 +238,7 @@ class Connection(object):
 						return True
 					# Check Keep-Alive availability
 					self.allow_keep_alive = ("connection" in self.request_headers and self.request_headers["connection"].lower() == "keep-alive")
+
 					# Handle request
 					self.handle_request()
 					break
@@ -499,6 +515,9 @@ class Connection(object):
 		self.cgi_sent_header = ""
 		def send_data():
 			data = self.cgi_process.stdout.read(1024 * 512)
+			if data == "":
+				# Does not mean anything: Non-Blocking IO..
+				return True
 			if type(self.cgi_sent_header) is str:
 				self.cgi_sent_header += data
 				if "\r\n\r\n" in data:
@@ -539,6 +558,9 @@ class Connection(object):
 			return True
 		self.event_ids.append(glib.io_add_watch(self.cgi_process.stdout, glib.IO_IN | glib.IO_HUP | glib.IO_ERR, lambda fd, cond: send_data() or True))
 		def child_terminated():
+			if self.do_chunk:
+				self.socket.send("0\r\n\r\n")
+				self.do_chunk = False
 			self.handle_hup()
 		self.event_ids.append(glib.child_watch_add(self.cgi_process.pid, lambda pid, cond: child_terminated() or False))
 
