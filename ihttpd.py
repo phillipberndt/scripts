@@ -95,10 +95,12 @@ class Connection(object):
 		self.data_cache = ""
 		self.hup_done = False
 		self._restart_handlers(30)
+		self.allow_crlf = False
 		Connection.instances += 1
 	
 	def _restart_handlers(self, timeout):
 		self.state = 1
+		self.allow_crlf = True
 		self.request_headers = {}
 		self.request_type = ""
 		self.request_uri = ""
@@ -154,7 +156,7 @@ class Connection(object):
 		retval = status + "\r\n"
 		for header, values in headers.items():
 			for value in values:
-				retval += header.capitalize() + ": " + str(value) + "\r\n"
+				retval += "-".join([ x.capitalize() for x in header.split("-") ]) + ": " + str(value) + "\r\n"
 		retval += "\r\n"
 		return retval
 	
@@ -196,6 +198,10 @@ class Connection(object):
 			data, self.data_cache = data
 			if data and data[-1] == "\r": data = data[:-1]
 			if self.state == 1: # Awaiting first line of request header
+				# Some servers send an empty crlf after requests. Ignore that.
+				if self.allow_crlf and data == "":
+					self.allow_crlf = False
+					return True
 				request = data.split()
 				if len(request) != 3 or (request[2] != "HTTP/1.1" and request[2] != "HTTP/1.0"):
 					self.reply_error(400)
@@ -230,16 +236,20 @@ class Connection(object):
 					# Disable timeout
 					glib.source_remove(self.timeout_id)
 					self.timeout_id = False
+					# Reply with an error for unsupported request types
+					if self.request_type not in ("POST", "GET", "HEAD"):
+						self.reply_error(501)
 					# Check how much more data we have to expect
 					try:
+						# TODO Chunked encoding?!
 						self.state_3_to_read = int(self.request_headers["content-length"]) if "content-length" in self.request_headers else 0
 					except:
 						self.reply_error(400)
 						return True
 					# Check Keep-Alive availability
-					self.allow_keep_alive = ("connection" in self.request_headers and self.request_headers["connection"].lower() == "keep-alive")
+					self.allow_keep_alive = ("connection" not in self.request_headers or self.request_headers["connection"].lower() != "keep-alive")
 
-					# Handle request
+					# Handle request if there is no data to read
 					self.handle_request()
 					break
 				if data[0] in (" ", "\t"):
@@ -263,6 +273,7 @@ class Connection(object):
 		if self.state == 3:
 			# Handle POST request data. This does not require line caching
 			if self.cgi_process:
+				# Forward to CGI process
 				send_now = self.data_cache[:self.state_3_to_read]
 				try:
 					self.cgi_process.stdin.write(send_now)
@@ -270,12 +281,25 @@ class Connection(object):
 					self.reply_error(500)
 				self.state_3_to_read -= len(send_now)
 				self.data_cache = self.data_cache[len(send_now):]
+			else:
+				# If there is no CGI-process, ignore the data
+				send_now = self.data_cache[:self.state_3_to_read]
+				self.state_3_to_read -= len(send_now)
+				self.data_cache = self.data_cache[len(send_now):]
+				if self.state_3_to_read == 0:
+					# TODO We should read the data and ignore it
+					# But this does not work out.. instead, for POST requests on
+					# ordinary files, we disallow Keep-Alive.
+					pass
 		return True
 
 	# Hande an actual request
 	def handle_request(self):
 		# Handle virtual paths, especially directory icons
 		if self.request_file[:23] == "/iwebd-directory-icons/" and has_gtk:
+			if self.request_type == "POST":
+				# This is required because we don't read POST data for this request
+				self.allow_keep_alive = False
 			try:
 				output = StringIO.StringIO()
 				def send_data(buf, data=None):
@@ -299,6 +323,9 @@ class Connection(object):
 			for index in ("index.html", "index.php", "index.pl", "index"):
 				new_path = os.path.join(path, index)
 				if os.access(new_path, os.F_OK):
+					if self.request_type == "POST":
+						# This is required because we don't read POST data for this request
+						self.allow_keep_alive = False
 					try:
 						self.socket.send(self._headers("HTTP/1.1 301 Permanently redirected", { "Content-Length": "0", "Location": os.path.join(self.request_file, index) }))
 					except:
@@ -310,6 +337,9 @@ class Connection(object):
 			# This is a directory.
 			# Redirect to a URL ending in a slash
 			if self.request_file and self.request_file[-1] != "/":
+				if self.request_type == "POST":
+					# This is required because we don't read POST data for this request
+					self.allow_keep_alive = False
 				try:
 					self.socket.send(self._headers("HTTP/1.1 301 Permanently redirected", { "Content-Length": "0", "Location": self.request_file + "/" }))
 				except:
@@ -369,6 +399,9 @@ class Connection(object):
 				except:
 					self.handle_hup()
 					return
+			if self.request_type == "POST":
+				# This is required because we don't read POST data for this request
+				self.allow_keep_alive = False
 			response_headers = {
 				"Content-Length": len(output_str),
 				"Content-Type": "text/html; charset=utf-8"
@@ -389,6 +422,11 @@ class Connection(object):
 			if extension in cgi_handlers:
 				self.handle_cgi([cgi_handlers[extension], path])
 				return
+
+			if self.request_type == "POST":
+				# This is required because we don't read POST data for this request
+				self.allow_keep_alive = False
+
 			# Send the file back to the user
 			response_file = open(path, "r")
 
@@ -509,12 +547,11 @@ class Connection(object):
 		def pre_exec_handler():
 			# Ignore interrupt signal
 			signal.signal(signal.SIGINT, signal.SIG_IGN)
-		self.cgi_process = subprocess.Popen(argv, close_fds=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=environ, preexec_fn=pre_exec_handler)
-		fcntl.fcntl(self.cgi_process.stdout.fileno(), fcntl.F_SETFL, fcntl.fcntl(self.cgi_process.stdout.fileno(), fcntl.F_GETFL) | os.O_NONBLOCK)
-
 		self.cgi_sent_header = ""
 		def send_data():
+			sys.stdout.flush()
 			data = self.cgi_process.stdout.read(1024 * 512)
+			sys.stdout.flush()
 			if data == "":
 				# Does not mean anything: Non-Blocking IO..
 				return True
@@ -556,36 +593,48 @@ class Connection(object):
 					self.do_chunk = False
 				self.handle_finished()
 			return True
-		self.event_ids.append(glib.io_add_watch(self.cgi_process.stdout, glib.IO_IN | glib.IO_HUP | glib.IO_ERR, lambda fd, cond: send_data() or True))
 		def child_terminated():
 			if self.do_chunk:
 				self.socket.send("0\r\n\r\n")
 				self.do_chunk = False
-			self.handle_hup()
+			self.handle_finished()
+		self.cgi_process = subprocess.Popen(argv, close_fds=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=environ, preexec_fn=pre_exec_handler)
+		fcntl.fcntl(self.cgi_process.stdout.fileno(), fcntl.F_SETFL, fcntl.fcntl(self.cgi_process.stdout.fileno(), fcntl.F_GETFL) | os.O_NONBLOCK)
 		self.event_ids.append(glib.child_watch_add(self.cgi_process.pid, lambda pid, cond: child_terminated() or False))
+		self.event_ids.append(glib.io_add_watch(self.cgi_process.stdout, glib.IO_IN | glib.IO_HUP | glib.IO_ERR, lambda fd, cond: send_data() or True))
 
 	# Generate an error message
 	def reply_error(self, err_no = 500):
+		end_connection = False
 		if err_no == 500:
 			err_str = "Internal server error"
+			end_connection = True
+		elif err_no == 501:
+			err_str = "Not implemented"
+			end_connection = True
 		elif err_no == 404:
 			err_str = "Not found"
 		elif err_no == 400:
 			err_str = "Bad request"
+			end_connection = True
 		elif err_no == 408:
 			err_str = "Request Time-out"
+			end_connection = True
 		elif err_no == 507:
 			err_str = "Insufficient Storage"
 		else:
 			err_str = "Generic error"
+		if end_connection:
+			self.allow_keep_alive = False
 		try:
-			self.socket.send(self._headers("HTTP/1.1 %d %s" % (err_no, err_str), { "Content-Type": "text/html; charset=utf8" }) +
-				"<!DOCTYPE HTML>" + self._gen_head("Failed to handle your request") + "<body><h1>Failed to handle your request</h1><p>" +
-				err_str + "</p>")
+			error_message = "<!DOCTYPE HTML>" + self._gen_head("Failed to handle your request") + \
+				"<body><h1>Failed to handle your request</h1><p>" + err_str + "</p>"
+			headers = { "Content-Type": "text/html; charset=utf8", "Content-Length": len(error_message)}
+			self.socket.send(self._headers("HTTP/1.1 %d %s" % (err_no, err_str), headers) + error_message)
 		except:
 			self.handle_hup()
 			return
-		if err_no < 400:
+		if not end_connection:
 			self.handle_finished()
 		else:
 			self.handle_hup()
