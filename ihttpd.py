@@ -520,7 +520,7 @@ class Connection(object):
 				return True
 			if type(self.cgi_sent_header) is str:
 				self.cgi_sent_header += data
-				if "\r\n\r\n" in data:
+				if "\r\n\r\n" in self.cgi_sent_header:
 					response_headers, data = self.cgi_sent_header.split("\r\n\r\n", 1)
 					try:
 						self.socket.send(self._headers("HTTP/1.1 200 Ok", response_headers))
@@ -528,8 +528,8 @@ class Connection(object):
 						self.handle_hup()
 						return
 					self.cgi_sent_header = True
-				elif "\n\n" in data:
-					response_headers, data = self.cgi_sent_header.split("\r\n\r\n", 1)
+				elif "\n\n" in self.cgi_sent_header:
+					response_headers, data = self.cgi_sent_header.split("\n\n", 1)
 					try:
 						self.socket.send(self._headers("HTTP/1.1 200 Ok", response_headers))
 					except:
