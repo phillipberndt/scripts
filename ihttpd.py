@@ -239,9 +239,14 @@ class Connection(object):
 					# Reply with an error for unsupported request types
 					if self.request_type not in ("POST", "GET", "HEAD"):
 						self.reply_error(501)
+						return True
 					# Check how much more data we have to expect
+					if "transfer-encoding" in self.request_headers and self.request_headers["transfer-encoding"] == "chunked":
+						# Actually HTTP/1.1 REQUIREs servers to implement chunked encoding, but I have not met any
+						# clients which actually use it. So this is not implemented.
+						self.reply_error(501)
+						return True
 					try:
-						# TODO Chunked encoding?!
 						self.state_3_to_read = int(self.request_headers["content-length"]) if "content-length" in self.request_headers else 0
 					except:
 						self.reply_error(400)
