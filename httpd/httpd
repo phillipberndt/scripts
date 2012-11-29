@@ -1,0 +1,61 @@
+#!/bin/bash
+#
+# Wrapper for lighthttpd for execution on an ad-hoc basis
+#
+if [ "$1" == "-h" ]; then
+	echo "lighthttpd local wrapper script"
+	echo
+	echo "Parameters: (mutually exclusive)"
+	echo " <port> run on port xyz"
+	echo " -r     create local configuration file (e.g. for rewriting)"
+	exit
+fi
+
+if [ "$1" == "-r" ]; then
+	[ -e .lighthttpd.local ] || cat >> .lighthttpd.local << EOF
+url.rewrite-once = (
+	"foo" => "bar"
+)
+
+url.rewrite-once-if-not-file = (
+	"foo" => "bar"
+)
+
+url.rewrite-repeat-if-not-file = (
+	"foo" => "bar"
+)
+EOF
+
+${EDITOR:-vi} .lighthttpd.local
+exit
+fi
+
+CONFIG=`tempfile`
+PORT=${1:-1234}
+
+removetemp() {
+	rm -f $CONFIG
+	exit
+}
+
+trap removetemp 15 9 2 3
+
+cat > $CONFIG <<EOF
+server.document-root = "`pwd`"
+server.port = $PORT
+server.modules = ("mod_cgi", "mod_rewrite")
+dir-listing.activate = "enable" 
+cgi.assign = ( ".php" => "/usr/bin/php-cgi", ".cgi" => "/usr/bin/perl" )
+mimetype.assign = (
+	`sed -rne 's/(.+):\*(.+)/"\2" => "\1",/p' /usr/share/mime/globs | sort -fut "=" -k 1,1`
+	""              =>      "application/octet-stream",
+)
+EOF
+
+if [ -e ".lighthttpd.local" ]; then
+	cat ".lighthttpd.local" >> $CONFIG
+fi
+
+echo "Starting lighthttpd on port $PORT.."
+lighttpd -f $CONFIG -D
+rm -f $CONFIG
