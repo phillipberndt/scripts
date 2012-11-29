@@ -1,0 +1,63 @@
+#!/bin/zsh
+#
+# This script chooses a file from ~/.bg/ randomly and displays
+# it as the xroot image. In dual screen setups, it automatically
+# chooses a second one.
+#
+# The right-most part is drawn with a semi-transparent white overlay,
+# to make conky more readable.
+#
+
+if [ "$1" = "-daemon" ]; then
+	(
+		while true; do
+			$0
+
+			for i in `seq 30`; do
+				sleep 1m
+				xset q >/dev/null 2>&1
+				if [ "$?" != "0" ]; then
+					exit
+				fi
+			done
+		done
+
+	) &
+	disown
+	exit
+fi
+
+FILES=(`ls ~/.bg/* | grep -E "(jpg|png|jpeg)$"`)
+
+SCREEN_WIDTH=`xrandr 2>&1 2>&1 | sed -rne 's/.+current ([0-9]+) x ([0-9]+).+/\1/p'`
+WIDTH=`xdotool getdisplaygeometry | awk '{print $1}'`
+HEIGHT=`xdotool getdisplaygeometry | awk '{print $2}'`
+CLIP=$(($WIDTH - 580))
+F1T=$(mktemp /tmp/tmp.XXXXXX.png)
+
+F1=$FILES[$(( $RANDOM * (${#FILES}) / 32767 + 1))]
+
+if [ $WIDTH -lt $SCREEN_WIDTH ]; then
+	# Dual screen
+	
+	F2=`
+		F2=$FILES[$(( $RANDOM * (${#FILES}) / 32767 + 1))]
+		while [ "$F2" = "$F1" ]; do
+			F2=$FILES[$(( $RANDOM * (${#FILES}) / 32767 + 1))]
+		done
+		echo $F2
+	`
+
+	IMG_SIZE=(`identify $F1 | sed -re 's/.+ ([0-9]+)x([0-9]+).+/\1 \2/'`)
+	convert $F1\[$(($IMG_SIZE[1]-$CLIP))x$IMG_SIZE[2]+$CLIP+0\] -strokewidth 0 -fill "rgba(255, 255, 255, 0.3)" -draw "rectangle 0,0 $CLIP,$IMG_SIZE[1]" -fill "black" -draw "rectangle 0,0 .5,$IMG_SIZE[1]" $F1T
+	xli -quiet -onroot -at $WIDTH,0 $F1 -onroot -clip 0,0,$WIDTH,$HEIGHT $F2 -onroot -at $(($WIDTH+$CLIP)),0 $F1T
+	rm -f $F1T
+
+else
+	# Single screen
+	
+	IMG_SIZE=(`identify $F1 | sed -re 's/.+ ([0-9]+)x([0-9]+).+/\1 \2/'`)
+	convert $F1\[$(($IMG_SIZE[1]-$CLIP))x$IMG_SIZE[2]+$CLIP+0\] -strokewidth 0 -fill "rgba(255, 255, 255, 0.3)" -draw "rectangle 0,0 $CLIP,$IMG_SIZE[1]" -fill "black" -draw "rectangle 0,0 .5,$IMG_SIZE[1]" $F1T
+	xli -quiet -onroot -at 0,0 $F1 -onroot -at $CLIP,0 $F1T
+	rm -f $F1T
+fi

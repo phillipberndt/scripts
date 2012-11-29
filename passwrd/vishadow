@@ -1,0 +1,11 @@
+#!/bin/sh
+if ! mount | egrep -q "/tmp type (tmp|ram)fs"; then
+	echo "No ramfs mount on /tmp"
+	exit
+fi
+
+FILE=$(mktemp)
+gpg -d ~/.myshadow > $FILE
+vi -n $FILE
+gpg -ear $(whoami) < $FILE > ~/.myshadow
+shred $FILE

@@ -1,0 +1,183 @@
+# Extended globbing aktivieren
+setopt extendedglob
+setopt null_glob
+setopt nomatch
+
+# Chdir immer mit Stack
+setopt auto_name_dirs
+setopt pushd_ignore_dups
+
+# Keybindings an Bashgewohnheiten anpassen
+bindkey -e
+bindkey "^[[2~" yank                    # Insert
+bindkey "^[[3~" delete-char             # Del
+bindkey "^[[5~" up-line-or-history      # PageUp
+bindkey "^[[6~" down-line-or-history    # PageDown
+bindkey "^[e"   expand-cmd-path         # C-e for expanding path of typed command.
+bindkey "^[[A"  up-line-or-search       # Up arrow for back-history-search.
+bindkey "^[[B"  down-line-or-search     # Down arrow for fwd-history-search.
+bindkey " "     magic-space             # Do history expansion on space.
+case "$TERM" in
+        linux|screen)
+                bindkey "^[[1~" beginning-of-line       # Pos1
+                bindkey "^[[4~" end-of-line             # End
+        ;;
+        *xterm*|(dt|k)term)
+                bindkey "^[OH"  beginning-of-line       # Pos1
+                bindkey "^[OF"  end-of-line             # End
+                bindkey "^[[7~" beginning-of-line       # Pos1
+                bindkey "^[[8~" end-of-line             # End
+        ;;
+        rxvt|Eterm)
+                bindkey "^[[7~" beginning-of-line       # Pos1
+                bindkey "^[[8~" end-of-line             # End
+        ;;
+esac
+
+# Completion anschalten
+autoload -Uz compinit
+compinit
+zstyle ':completion:*:descriptions' format '%U%B%d%b%u'
+zstyle ':completion:*:warnings' format '%BSorry, no matches for: %d%b'
+zstyle ':completion:*' menu select
+
+# Namenskorrektur anschalten
+setopt correct
+
+# Mein lokales site-Verzeichnis
+fpath=(~/.zsh/site/ $fpath)
+
+# Den Prompt wie von Gentoo gewöhnt einstellen
+# Außerdem Fenstertitel wieder ändern und Pfadausgabe auf 50 Zeichen
+# einschränken
+autoload -U promptinit
+promptinit
+prompt gentoo
+export PS1="${PS1:s/%1~/%50<...<%~/}"
+case ${TERM} in
+	xterm*|rxvt*|Eterm|aterm|kterm|gnome*|interix)
+		_settitle() {
+			echo -ne "\033]0;${USER}@${HOSTNAME%%.*}:${PWD/$HOME/~}\007"
+		}
+		add-zsh-hook precmd _settitle
+		;;
+	screen)
+		_settitle() {
+			echo -ne "\033_${USER}@${HOSTNAME%%.*}:${PWD/$HOME/~}\033\\"
+		}
+		add-zsh-hook precmd _settitle
+		;;
+esac
+
+# Alles in Farbe
+alias ls="ls --color=auto -h"
+export LESSCOLOR=yes
+
+# Auf ^X den Editor schalten
+export EDITOR=vim
+autoload -U edit-command-line
+zle -N edit-command-line
+bindkey '^X' edit-command-line
+
+# Die wichtigsten Aliase
+alias grep="grep -i --color=auto"
+alias aspell="aspell --lang DE"
+alias rm="rm -i"
+alias l="ls"
+alias cp="cp -i"
+alias mysql="mysql -u root"
+
+# Meine eigenen Befehle
+mkc() {
+	export CWD
+	C="$@"
+	[[ "$C" == "" ]] && C="$(date +'%d.%m')"
+	test -d "$C" || mkdir "$C"
+	cd "$C"
+}
+gitup() {
+	export PWD
+	while [[ "$PWD" != "/" && ! -d .git ]]; do
+		cd ..
+	done
+}
+
+# Hook: Lokale .zshrc
+set -A _chpwd_local_zshrc_cache
+_chpwd_local_zshrc() {
+	[ -e .zshrc.local ] || return
+	
+	# Check if this file has already been sourced
+	last_mod=$(stat -c %Y .zshrc.local)
+	full_path=$(pwd)/.zshrc.local
+	at_index=-1
+	index=-1
+	unchanged=1
+	for name mtime in $_chpwd_local_zshrc_cache; do
+		((index+=1))
+		if [ "$name" = "$full_path" ]; then
+			at_index=$index
+			if [[ $mtime < $last_mod ]]; then
+				unchanged=0
+			fi
+			break
+		fi
+	done
+	[[ "$unchanged" = "1" && "$at_index" != "-1" ]] && return
+	if [ "$at_index" = -1 ]; then
+		_chpwd_local_zshrc_cache=($_chpwd_local_zshrc_cache $full_path $last_mod)
+	else
+		_chpwd_local_zshrc_cache[(($at_index+2))]=$last_mod
+	fi
+
+	# Check if this file is well-known
+	shasum=$(sha1sum .zshrc.local)
+
+	if ! grep -q $shasum ~/.zsh/local_zshrc_shasums &> /dev/null; then
+		while true; do
+			echo "This directory has an unverified local .zshrc."
+			echo -n "[e]xamine, [r]un or [i]gnore? "
+			read -s -k 1 action
+			echo -n "\033[2A\r\033[J"
+			if [ "$action" = "e" ]; then
+				$EDITOR .zshrc.local
+			elif [ "$action" = "r" ]; then
+				echo $shasum $full_path >> ~/.zsh/local_zshrc_shasums
+				# Source the file
+				source .zshrc.local
+				break
+			else
+				break
+			fi
+		done			
+	else
+		# Source the file
+		source .zshrc.local
+	fi
+}
+add-zsh-hook chpwd _chpwd_local_zshrc
+
+# Lokale Verzeichnisse
+export PERL_LOCAL_LIB_ROOT="$HOME/.local";
+export PERL_MB_OPT="--install_base $HOME/.local";
+export PERL_MM_OPT="INSTALL_BASE=$HOME/.local";
+export PERL5LIB="$HOME/.local/lib/perl5/x86_64-linux-gnu-thread-multi:$HOME/.local/lib/perl5:$PERL5LIB";
+export PATH="$HOME/.local/bin:$PATH"
+export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
+
+# Wenn beim Start der Shell das Verzeichnis nicht $HOME ist, dorthin wechseln
+# Wichtig wenn $HOME beim Start der Session noch nicht existierte
+if [ "$PWD" = "/" ]; then
+	cd $HOME
+fi
+
+# Display-Variable, wenn nicht gesetzt
+if [ -z "$DISPLAY" -a -e "/proc/`pgrep -u $USER dbus-daemon`/environ" ]; then
+	export DISPLAY=$(cat /proc/`pgrep -u $USER dbus-daemon`/environ | tr "\0" "\n" | sed -ne 's/DISPLAY=//p')
+fi
+
+# Beim ersten Start einer zshell (nach Systemstart) die todo Liste anzeigen
+if ! [ $HOME/.zsh/.todo_zsh_timestamp(ms-$(grep -Eo "^[0-9]+" /proc/uptime)) ]; then
+	touch $HOME/.zsh/.todo_zsh_timestamp
+	todo -i
+fi

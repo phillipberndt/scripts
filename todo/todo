@@ -1,0 +1,221 @@
+#!/usr/bin/perl -w
+use strict;
+use File::Find;
+use Pod::Usage;
+use File::Basename;
+use Term::Size;
+use Term::ANSIColor qw(:constants);
+use Sys::Hostname;
+use Net::Netmask;
+use Socket;
+use Time::Local;
+use Getopt::Std;
+
+my %opts;
+sub HELP_MESSAGE {
+	pod2usage();
+}
+getopts('rhnaAei', \%opts);
+HELP_MESSAGE if(defined $opts{"h"});
+$opts{"a"} = 1 if(basename($0) eq "tda");
+$opts{"e"} = 1 if(basename($0) eq "tde");
+
+# Fetch some information on environmental variables for use in the output helper function
+my $terminal_columns = Term::Size::chars *STDOUT{IO};
+my $hostname = hostname;
+my $ip = inet_ntoa((gethostbyname($hostname))[4]);
+
+# Guess which is the current directory's todo file
+sub find_todo {
+	return ".todo" if($opts{"n"});
+	return "TODO"  if -e "TODO";
+	return ".todo" if -e ".todo";
+	return "todo"  if -e "todo";
+	my @todo_file = grep(m!([^/]+/)?\.?todo(?:\.txt)?$!i, <.* * */.* */*>);
+	return @todo_file ? $todo_file[0] : "TODO";
+}
+
+# Add lines to an existing todo file (or create a new one)
+if(defined $opts{"a"} or defined $opts{"e"}) {
+	my $todo_file = find_todo;
+
+	$ENV{"EDITOR"} = "vim" unless($ENV{"EDITOR"});
+	exec ($ENV{"EDITOR"}, $todo_file) if defined $opts{"e"};
+	print "Adding to todo file " . $todo_file . "\n";
+	unless(-w $todo_file) {
+		chdir $ENV{"HOME"};
+		my $other_todo_file = find_todo;
+		print STDERR "File " . $todo_file . " is not writeable. Instead, adding to user todo-file " . $other_todo_file . "\n";
+		$todo_file = $other_todo_file;
+	}
+	print "TODO: ";
+	{ local $|=1; print ""; }
+	my $LINE = <STDIN>;
+	chomp $LINE;
+	exit 1 unless $LINE;
+	chomp $LINE;
+	unless(open(TODO_OUT, ">>", $todo_file)) {
+		print STDERR "Failed to open " . $todo_file . ".";
+		exit 1;
+	}
+	print TODO_OUT "- " . $LINE . "\n";
+	close TODO_OUT;
+	exit 0;
+}
+
+# Handle a single todo file
+sub handle_file {
+	my $print_name = $_[0];
+	$print_name =~ s#^\./##;
+	my $output = "";
+	my $important = "";
+
+	return unless open TODO_IN, "<", $_[0];
+	while(<TODO_IN>) {
+		chomp;
+
+		# We support restrictions:
+		# Only some lines are actual todo lines
+		next unless m/^\s*[*+-]/;
+
+		# If the command line switch is set, only show important things
+		next if defined $opts{"i"} and not m/!!/;
+
+		unless($opts{"A"}) {
+			# Date restrictions (@d/m/Y-d/m/Y)
+			if(m!(?:^|\s)@(([0-9]{1,2})/([0-9]{1,2})/([0-9]{2}(?:[0-9]{2})?))?-(([0-9]{1,2})/([0-9]{1,2})/([0-9]{2}(?:[0-9]{2})?))?!) {
+				my $now = time;
+				my $from = $now;
+				my $until = $now;
+				if(defined $1) {
+					$from = timelocal(0, 0, 0, $2, $3 - 1, $4 < 100 ? $4 + 2000 : $4);
+				}
+				if(defined $5) {
+					$until = timelocal(0, 0, 0, $6, $7 - 1, $8 < 100 ? $8 + 2000 : $8);
+				}
+				next if($from > $now or $until < $now);
+			}
+			s!(?:^|\s)@(([0-9]{1,2})/([0-9]{1,2})/([0-9]{2}(?:[0-9]{2})?))?-(([0-9]{1,2})/([0-9]{1,2})/([0-9]{2}(?:[0-9]{2})?))?!!g;
+
+			# Network restrictions (@subnet/size)
+			my $has_network_restrictions = 0;
+			while(m/(?:^|\s)\@((?:[0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]+)/g) {
+				$has_network_restrictions = 1;
+				if((new Net::Netmask($1))->match($ip)) {
+					$has_network_restrictions = 0;
+					last;
+				}
+			}
+			next if($has_network_restrictions);
+			s/(?:^|\s)\@((?:[0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]+)//g;
+			
+			# Hostname restrictions (@hostname)
+			next if m/(?:\s|^)@\w+/ and not m/(?:\s|^)\@$hostname/i;
+			s/(?:\s|^)@\S+//g;
+		}
+
+		# Importance (++ or !!, and --)
+		my $identifier = GREEN . "+";
+		my $is_important = 0;
+		if(s/(?:!!|\+\+)//) {
+			$identifier = "\e[" . ($terminal_columns - 1) . "G" . BOLD . RED . "!!" . "\e[3G" . "!";
+			$is_important = 1;
+		}
+		if(s/--//) {
+			$identifier = BOLD . BLUE . "-";
+		}
+		$identifier .= RESET;
+
+		# Output the line
+		next unless s/^\s*[*+-]\s*/  $identifier /;
+		if($is_important) {
+			$important .= $_ . "\n";
+		}
+		else {
+			$output .= $_ . "\n";
+		}
+	}
+	$output = $important . $output;
+	close TODO_IN;
+
+	# Only tell the user about todo files which actually contain anything
+	# (of importance, i.e. non-filtered)
+	return unless $output;
+
+	# Output the file
+	print "- " . BOLD . $print_name . RESET . "\n" . $output;
+}
+
+if(defined $opts{"r"}) {
+	# Do a recursive search for todo files
+	find({ wanted => sub {
+		return unless m/(?:^|\/)\.?todo$/i;
+		handle_file($File::Find::name);
+	}, no_chdir => 1 }, ".");
+}
+else {
+	# Search for todo files in this directory
+	my $todo_file = find_todo;
+	handle_file($todo_file) if($todo_file);
+}
+
+__END__
+=head1 NAME
+
+todo - A simple todo script
+
+=head1 SYNOPSIS
+
+todo [options]
+
+Options:
+
+ -a   Add a todo entry
+ -A   Show all entries (See below)
+ -e   Edit the todo list
+ -n   Force the file .todo to be used
+ -i   Show important entries only
+ -r   List todo lists recursively
+
+=head1 DESCRIPTION
+
+B<todo> is a simple script to manage todo lists. It searches for todo lists in
+the current directory and one directory below it, named
+
+=over 8
+
+=item * todo
+
+=item * .todo
+
+=item * TODO
+
+=back
+
+or any other capitilization of the word.
+
+It will then offer to easily append entries to this list and/or edit the whole
+file in the default $EDITOR. By default it will list all lines of the file which
+look like they are part of a list, i.e.
+
+=over 8
+
+=item - Foo
+
+=back
+
+or similar.
+
+The script offers basic filtering capabilities, as described next.
+
+=head1 FILTERING
+
+Insert @qux into a line to have it displayed on host qux. This is useful for
+shared todo lists, p.e. when you synchronize the list between your pc and
+notebook. Insert @192.168.0.1/24 to only have the line displayed if the pc
+invoking B<todo> has an IP in the specified subnet. Insert @1/2/2010-1/2/2011
+to have the entry displayed starting from 1st of February 2010 until the same
+day in 2011. Insert !! to have todo tread the line as important and highlight
+it (or, if -i is specified, even display it).
+
+=cut

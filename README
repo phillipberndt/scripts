@@ -1,0 +1,74 @@
+This is a collection of scripts I use in my everyday live. They are very useful
+to me, but I don't consider them interesting enough to maintain them in
+individual repositories. 
+
+I mainly put this up here so that I can easily move into new computers' $HOMEs.
+Don't expect too much documentation. But feel free to contact me if you have
+any questions.
+
+Unless stated otherwise in specific files, everything within this repository is
+released under the terms of the GNU Public License <http://www.gnu.org/licenses/gpl-3.0.html>.
+
+
+
+Contents:
+
+* gdo
+
+  find(1)-like utility with support for
+   
+      find -regextype pcre -iregex "$1" -exec "$2" \;
+
+  but (a) this really works with pcre, (b) more comfortable:
+
+      gdo regex +anotherregex <command>
+
+  use $.. or %.. to backreference in the command.
+
+
+* passwrd
+
+  Meant to be bound to a hotkey. Searches for the active window's title,
+  decrypts a secret password file, searches for the correct password and enters
+  it automatically.
+
+  You'll need to use gpg-agent for this to work. No support for
+  passphrase-input-windows
+
+
+* runGraphical
+
+  Yet another program starter for X11. Define shortcuts and execute the
+  commands easily. For example, put
+
+      o opera
+
+  in the configuration file and start the program. Now you'll only need to hit
+  "o", and opera will start.
+
+
+* todo
+
+  Tiny todo file management with support for annotations like due date,
+  priorities and multiple hosts.
+ 
+
+* unpack
+
+  Generic unpacker for a variety of formats. Takes care of not messing up your
+  $PWD. Can download files for you.
+
+
+* zshrc
+
+  My .zshrc (actually, ~/.zsh directory)
+
+
+* conky_and_bg
+
+  My conky configuration, worker scripts and a hilarious™ script which
+  automatically changes your desktop image by a random choice from a
+  backgrounds directory - with support for dual screen setups and automatic
+  ImageMagick invocation to draw a semi-transparent box at the right edge of
+  the screen. Where conky resides. For X11 setups without RGBA extension, where
+  conky can not do this by itself.

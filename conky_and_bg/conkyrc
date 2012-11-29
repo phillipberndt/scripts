@@ -1,0 +1,57 @@
+# imap <F5> <ESC>:w<CR>:!pkill conky; conky &<CR><CR>i
+#
+# http://conky.sourceforge.net/variables.html
+# http://conky.sourceforge.net/config_settings.html
+
+use_xft yes
+xftfont verdana:size=8
+alignment top_right
+gap_x 100
+gap_y 50
+xftalpha 0.8
+own_window yes
+own_window_type override
+own_window_transparent yes
+own_window_hints undecorated,below,sticky,skip_taskbar,skip_pager
+double_buffer yes
+draw_shades no
+draw_outline no
+draw_borders no
+stippled_borders 10
+border_width 1
+default_shade_color grey
+default_outline_color black
+default_color 000000
+use_spacer none
+no_buffers yes
+uppercase no
+color1 000000
+
+
+
+TEXT
+     ${color 333}${font Radio Space:size=14}${time %A %d %Y}
+          ${font Radio Space:size=55}${time %H:%M}
+${execpi 600 ~/.apps/conky_weather.py}
+
+
+
+
+
+
+   ${color}${font PizzaDude Bullets:size=16}v${font}   Up: ${upspeed eth0} 
+   ${font PizzaDude Bullets:size=16}r${font}   Down: ${downspeed eth0}
+
+   ${font PizzaDude Bullets:size=16}M${font}   Upload: ${totalup eth0}
+   ${font PizzaDude Bullets:size=16}S${font}   Download: ${totaldown eth0}
+
+   ${font StyleBats:size=16}A${font}  CPU0: ${cpu cpu0}% ${cpubar cpu0}
+   ${font StyleBats:size=16}A${font}  CPU1: ${cpu cpu1}% ${cpubar cpu1}
+
+   ${font PizzaDude Bullets:size=16}J${font}   $mem / $memmax
+
+   ${font StyleBats:size=18}P${font}  Work:  ${uptime_short}
+
+
+${font Inconsolata:size=12}${execpi 30000 ~/.apps/conky_cal.py }
+${font}${color}${head ~/TODO 30 5}
