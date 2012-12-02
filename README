@@ -80,3 +80,11 @@ Contents:
   but one which can actually handle real-world-situations. This wrapper script
   runs lighttpd, in the same fashion as my ihttpd: Serving from ./, with
   support for PHP.
+
+* nonroot_apt
+
+  A script for Debian based systems which allows non-root users to install
+  missing packages into their own $PREFIXes. It basically invokes apt-get to
+  get the URLs to the package and its dependencies and then downloads all the
+  files and unpacks them whereever the user wants them. Includes basic
+  tracking for already satisfied dependencies.
