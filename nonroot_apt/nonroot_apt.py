@@ -48,7 +48,7 @@ else:
 # Check for already satisfied dependencies
 satisfied = []
 if os.access(".packages", os.R_OK):
-	satisfied = [ x.trim() for x in open(".packages").readlines() ]
+	satisfied = [ x.strip() for x in open(".packages").readlines() ]
 
 # Create a local copy of the apt-get file structure for
 # appending to the sources.list file
