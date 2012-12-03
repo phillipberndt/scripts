@@ -11,7 +11,7 @@
 if [ "$1" = "-daemon" ]; then
 	(
 		while true; do
-			$0
+			$HOME/.bg/setbg
 
 			for i in `seq 30`; do
 				sleep 1m
