@@ -11,7 +11,7 @@
 if [ "$1" = "-daemon" ]; then
 	(
 		while true; do
-			$HOME/.bg/setbg
+			zsh $HOME/.bg/setbg
 
 			for i in `seq 30`; do
 				sleep 1m
@@ -28,8 +28,7 @@ if [ "$1" = "-daemon" ]; then
 fi
 
 FILES=(`ls ~/.bg/* | grep -E "(jpg|png|jpeg)$"`)
-
-SCREEN_WIDTH=`xrandr 2>&1 2>&1 | sed -rne 's/.+current ([0-9]+) x ([0-9]+).+/\1/p'`
+SCREEN_WIDTH=`xrandr 2>&1 | sed -rne 's/.+current ([0-9]+) x ([0-9]+).+/\1/p'`
 WIDTH=`xdotool getdisplaygeometry | awk '{print $1}'`
 HEIGHT=`xdotool getdisplaygeometry | awk '{print $2}'`
 CLIP=$(($WIDTH - 580))
