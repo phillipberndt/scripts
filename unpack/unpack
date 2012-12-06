@@ -16,6 +16,8 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 06.12.2012
+#    7z command name updated
 #  - 07.11.2012
 #    Added options for target specification and passing-through to extractors
 #  - 21.10.2012
@@ -155,19 +157,23 @@ def defaultTypeGenerator(regexExtension, regexMime, program, command, fileBefore
 	return tmpcls
 # }}}
 
+
 # Various file types
 RARFile = defaultTypeGenerator(r"\.rar", "application/x-rar", "unrar", "unrar x %s %s %s", True)
 TARLZMAFile = defaultTypeGenerator(r"\.tar\.(lzma|xz)", "^$", "tar", "tar x %s --lzma -C %s -f %s", False)
 TBZFile = defaultTypeGenerator(r"\.(tbz|tar\.bz2?)", "application/x-tar.+application/x-bzip2", "tar", "tar xj %s -C %s -f %s", False)
 TGZFile = defaultTypeGenerator(r"\.(tgz|tar\.g?z)", "application/x-tar.+application/x-gzip", "tar", "tar xz %s -C %s -f %s", False)
 TARFile = defaultTypeGenerator(r"\.tar", "application/x-tar", "tar", "tar x %s -C %s -f %s", False)
-SEVENZFile = defaultTypeGenerator(r"\.7z", "^$", "7zr", "7zr x %s -o%s %s", False)
 CABFile = defaultTypeGenerator(r"\.cab", "^$", "cabextract", "cabextract %s -d %s %s", False)
 LHAFile = defaultTypeGenerator(r"\.lha", "application/x-lha", "lha", "lha x %s -w=%s %s", False)
 ARJFile = defaultTypeGenerator(r"\.arj", "application/x-arj", "arj", "arj x %s %s %s", True)
 CPIOfile = defaultTypeGenerator(r"\.cpio", "application/x-cpio", "cpio", "cat %s | (cd %s && cpio %s -i --no-absolute-filenames --make-directories)", True)
 ISOFile = defaultTypeGenerator(r"\.iso", "application/x-iso9660", "7zr", "7zr x %s -o%s %s", False)
-MSIFile = defaultTypeGenerator(r"\.msi", "", "7zr", "7zr x %s -o%s %s", False)
+sevenZExecutable = "7zr"
+if os.system("which 7zr >/dev/null") != 0:
+	sevenZExecutable = "7z"
+SEVENZFile = defaultTypeGenerator(r"\.7z", "^$", sevenZExecutable, sevenZExecutable + " x %s -o%s %s", False)
+MSIFile = defaultTypeGenerator(r"\.msi", "", sevenZExecutable, sevenZExecutable + " x %s -o%s %s", False)
 class ZIPFile(filetype): # {{{
 	TYPE_DEF = r"\.(?:zip|jar)"
 	TYPE_MIME_DEF = "application/(?:x-)?zip"
