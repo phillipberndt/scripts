@@ -68,6 +68,8 @@ if "-s" in opts:
 		sourcesList.close()
 	aptOptions = "--force-yes -o Acquire::http::Proxy=0 -o Debug::NoLocking=true --allow-unauthenticated -o Dir=_aptlocal " + ("-qq" if "-q" in opts else "")
 	os.system("apt-get " + aptOptions + " update")
+elif os.path.isdir("_aptlocal"):
+	aptOptions = "--force-yes -o Acquire::http::Proxy=0 -o Debug::NoLocking=true --allow-unauthenticated -o Dir=_aptlocal " + ("-qq" if "-q" in opts else "")
 
 packages = args
 
