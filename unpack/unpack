@@ -16,6 +16,8 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 12.12.2012
+#    Support for .tar.xz
 #  - 06.12.2012
 #    7z command name updated
 #  - 07.11.2012
@@ -163,6 +165,7 @@ RARFile = defaultTypeGenerator(r"\.rar", "application/x-rar", "unrar", "unrar x 
 TARLZMAFile = defaultTypeGenerator(r"\.tar\.(lzma|xz)", "^$", "tar", "tar x %s --lzma -C %s -f %s", False)
 TBZFile = defaultTypeGenerator(r"\.(tbz|tar\.bz2?)", "application/x-tar.+application/x-bzip2", "tar", "tar xj %s -C %s -f %s", False)
 TGZFile = defaultTypeGenerator(r"\.(tgz|tar\.g?z)", "application/x-tar.+application/x-gzip", "tar", "tar xz %s -C %s -f %s", False)
+TGZFile = defaultTypeGenerator(r"\.tar\.xz", "application/x-tar.+application/x-xz", "tar", "tar x %s --lzma -C %s -f %s", False)
 TARFile = defaultTypeGenerator(r"\.tar", "application/x-tar", "tar", "tar x %s -C %s -f %s", False)
 CABFile = defaultTypeGenerator(r"\.cab", "^$", "cabextract", "cabextract %s -d %s %s", False)
 LHAFile = defaultTypeGenerator(r"\.lha", "application/x-lha", "lha", "lha x %s -w=%s %s", False)

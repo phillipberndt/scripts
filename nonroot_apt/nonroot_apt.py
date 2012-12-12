@@ -49,6 +49,7 @@ else:
 satisfied = []
 if os.access(".packages", os.R_OK):
 	satisfied = [ x.strip() for x in open(".packages").readlines() ]
+system_packages = [ x.strip() for x in os.popen("dpkg -l | awk '{print $2}'").readlines() ]
 
 # Create a local copy of the apt-get file structure for
 # appending to the sources.list file
@@ -74,11 +75,18 @@ elif os.path.isdir("_aptlocal"):
 packages = args
 
 # Get a list of required packages
-packages = os.popen("apt-get install --no-install-recommends --reinstall --print-uris -qq " + aptOptions + " ".join(packages)).readlines()
+packages = [x.strip() for x in os.popen("apt-get install --no-install-recommends --reinstall --print-uris -qq " + aptOptions + " ".join(packages)).readlines()]
+
+packages = filter(lambda x: os.path.basename(x.split("'")[1]) not in satisfied, packages)
+def pfilter(x):
+	x = os.path.basename(x.split("'")[1])
+	return x[:x.find("_")] not in system_packages
+packages = filter(pfilter, packages)
+
 if "-q" not in opts:
 	print len(packages), "packages to go!"
 
-if len(packages) > 5 and "-q" not in opts:
+if 1: #if len(packages) > 5 and "-q" not in opts:
 	print "I am going to install:"
 	print " - " + "\n - ".join(( os.path.basename(x.split("'")[1]) for x in packages ))
 	print "Press <ENTER> to continue"
@@ -88,8 +96,6 @@ if len(packages) > 5 and "-q" not in opts:
 for package in packages:
 	uri = package.split("'")[1]
 	output = os.path.basename(uri)
-	if output in satisfied:
-		continue
 	os.system("wget %s -O %r %r" % ("-q" if "-q" in opts else "", output, uri))
 	dataFile = filter(lambda x: x[:4] == "data", os.popen("ar t %r" % output).readlines())
 	if not dataFile:
