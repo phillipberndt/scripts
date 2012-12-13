@@ -9,13 +9,14 @@ import sys
 import time
 
 try:
-	(lopts, args) = getopt.getopt(sys.argv[1:], "d:qs:")
+	(lopts, args) = getopt.getopt(sys.argv[1:], "d:qs:u")
 	opts = dict(lopts)
 except:
 	print "non-root apt-get\nCommand line switches:\n"
 	print "  -d <directory>     Set target directory"
 	print "  -s <line>          Use a specific repository for pulling the dependencies."
 	print "                     The parameter will be appended to sources.list."
+	print "  -u                 Upgrade local sources"
 	print "  -q                 Quiet mode"
 	sys.exit(1)
 
@@ -71,6 +72,9 @@ if "-s" in opts:
 	os.system("apt-get " + aptOptions + " update")
 elif os.path.isdir("_aptlocal"):
 	aptOptions = "--force-yes -o Acquire::http::Proxy=0 -o Debug::NoLocking=true --allow-unauthenticated -o Dir=_aptlocal " + ("-qq" if "-q" in opts else "")
+
+if "-u" in opts:
+	os.system("apt-get " + aptOptions + " update")
 
 packages = args
 
