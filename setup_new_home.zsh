@@ -74,7 +74,7 @@ chmod a+x .local/bin/cpanm
 # Initialize vim
 [ -e .vimrc ] && mv .vimrc vimrc-old
 git clone ${CLONE_BASE}vimconfig .vim
-ln -s .vim/vimrc .
+ln -s .vim/vimrc .vimrc
 cd .vim
 ./init-after-clone.sh
 cd ..
