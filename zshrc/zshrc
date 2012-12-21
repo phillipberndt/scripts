@@ -188,4 +188,4 @@ fi
 # Execute other scripts
 for SCRIPT in $HOME/.zsh/scripts/*(.x); do
 	source $SCRIPT
-fi
+done
