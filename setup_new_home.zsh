@@ -64,9 +64,9 @@ ln -s .zsh/zshrc .zshrc
 source .zshrc
 
 # Initialize Perl CPAN
-(echo yes; echo quit;) | cpan 
-# ProgressBar is required for gdo
-cpan -f -i Term::ProgressBar
+wget -O .local/bin/cpanm http://cpanmin.us
+.local/bin/cpanm -l `pwd`/.local local::lib
+.local/bin/cpanm -l `pwd`/.local Term::ProgressBar
 
 # Initialize vim
 [ -e .vimrc ] && mv .vimrc vimrc-old
