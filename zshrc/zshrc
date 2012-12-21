@@ -1,13 +1,13 @@
-# Extended globbing aktivieren
+# Extended globbing
 setopt extendedglob
 setopt null_glob
 setopt nomatch
 
-# Chdir immer mit Stack
+# Chdir stack enabled
 setopt auto_name_dirs
 setopt pushd_ignore_dups
 
-# Keybindings an Bashgewohnheiten anpassen
+# Keybindings closer to bash
 bindkey -e
 bindkey "^[[2~" yank                    # Insert
 bindkey "^[[3~" delete-char             # Del
@@ -34,22 +34,20 @@ case "$TERM" in
         ;;
 esac
 
-# Completion anschalten
+# Activate completion
 autoload -Uz compinit
 compinit
 zstyle ':completion:*:descriptions' format '%U%B%d%b%u'
 zstyle ':completion:*:warnings' format '%BSorry, no matches for: %d%b'
 zstyle ':completion:*' menu select
 
-# Namenskorrektur anschalten
+# Enable correction
 setopt correct
 
-# Mein lokales site-Verzeichnis
+# Activate the local site directory
 fpath=(~/.zsh/site/ $fpath)
 
-# Den Prompt wie von Gentoo gewöhnt einstellen
-# Außerdem Fenstertitel wieder ändern und Pfadausgabe auf 50 Zeichen
-# einschränken
+# Gentoo prompt and window title with path names
 autoload -U promptinit
 promptinit
 prompt gentoo
@@ -69,17 +67,17 @@ case ${TERM} in
 		;;
 esac
 
-# Alles in Farbe
+# Enable color
 alias ls="ls --color=auto -h"
 export LESSCOLOR=yes
 
-# Auf ^X den Editor schalten
+# Execute vim on ^X
 export EDITOR=vim
 autoload -U edit-command-line
 zle -N edit-command-line
 bindkey '^X' edit-command-line
 
-# Die wichtigsten Aliase
+# Aliases I use
 alias grep="grep -i --color=auto"
 alias aspell="aspell --lang DE"
 alias rm="rm -i"
@@ -87,7 +85,7 @@ alias l="ls"
 alias cp="cp -i"
 alias mysql="mysql -u root"
 
-# Meine eigenen Befehle
+# Some functions
 mkc() {
 	export CWD
 	C="$@"
@@ -102,7 +100,7 @@ gitup() {
 	done
 }
 
-# Hook: Lokale .zshrc
+# Hook: Local .zshrc's
 set -A _chpwd_local_zshrc_cache
 _chpwd_local_zshrc() {
 	[ -e .zshrc.local ] || return
@@ -157,27 +155,37 @@ _chpwd_local_zshrc() {
 }
 add-zsh-hook chpwd _chpwd_local_zshrc
 
-# Lokale Verzeichnisse
+# Library directories for perl, etc.
 export PERL_LOCAL_LIB_ROOT="$HOME/.local";
 export PERL_MB_OPT="--install_base $HOME/.local";
 export PERL_MM_OPT="INSTALL_BASE=$HOME/.local";
-export PERL5LIB="$HOME/.local/lib/perl5/x86_64-linux-gnu-thread-multi:$HOME/.local/lib/perl5:$PERL5LIB";
+export PERL5LIB="$HOME/.local/lib/perl5/:$PERL5LIB";
+ARCHLIB=`ls $HOME/.local/lib/perl5/ | grep -- -linux`
+if [ -n $ARCHLIB ]; then
+	export PERL5LIB="${ARCHLIB}:$PERL5LIB"
+fi
 export PATH="$HOME/.local/bin:$PATH"
 export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
 
-# Wenn beim Start der Shell das Verzeichnis nicht $HOME ist, dorthin wechseln
-# Wichtig wenn $HOME beim Start der Session noch nicht existierte
+# Change into $HOME if $PWD is /. I often work on PCs where $HOME does not exist
+# before logging in, so $PWD becomes /.
 if [ "$PWD" = "/" ]; then
 	cd $HOME
 fi
 
-# Display-Variable, wenn nicht gesetzt
+# Set the $DISPLAY variable if it is not set and the user has an open session
+# TODO Maybe replace this with consolekit someday
 if [ -z "$DISPLAY" -a -e "/proc/`pgrep -u $USER dbus-daemon`/environ" ]; then
 	export DISPLAY=$(cat /proc/`pgrep -u $USER dbus-daemon`/environ | tr "\0" "\n" | sed -ne 's/DISPLAY=//p')
 fi
 
-# Beim ersten Start einer zshell (nach Systemstart) die todo Liste anzeigen
+# Show a todo list after startup
 if ! [ $HOME/.zsh/.todo_zsh_timestamp(ms-$(grep -Eo "^[0-9]+" /proc/uptime)) ]; then
 	touch $HOME/.zsh/.todo_zsh_timestamp
 	todo -i
+fi
+
+# Execute other scripts
+for SCRIPT in $HOME/.zsh/scripts/*(.x); do
+	source $SCRIPT
 fi
