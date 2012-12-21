@@ -88,3 +88,7 @@ Contents:
   get the URLs to the package and its dependencies and then downloads all the
   files and unpacks them whereever the user wants them. Includes basic
   tracking for already satisfied dependencies.
+
+* venv
+  
+  A tool to setup virtual environments for more than just python.
