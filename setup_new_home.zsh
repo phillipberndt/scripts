@@ -68,6 +68,8 @@ wget -O .local/bin/cpanm http://cpanmin.us
 chmod a+x .local/bin/cpanm
 .local/bin/cpanm -l `pwd`/.local local::lib
 .local/bin/cpanm -l `pwd`/.local Term::ProgressBar
+.local/bin/cpanm -l `pwd`/.local Net::Netmask
+.local/bin/cpanm -l `pwd`/.local Term::Size
 
 # Initialize vim
 [ -e .vimrc ] && mv .vimrc vimrc-old
