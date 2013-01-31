@@ -57,7 +57,7 @@ if [ -e ".lighthttpd.local" ]; then
 fi
 
 if ! which lighttpd >/dev/null 2>&1; then
-	PATH=`dirname $0`/_lighttpd/sbin:$PATH
+	PATH=`dirname $(readlink -f $0)`/_lighttpd/sbin:$PATH
 fi
 
 echo "Starting lighthttpd on port $PORT.."
