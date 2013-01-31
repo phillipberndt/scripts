@@ -56,6 +56,10 @@ if [ -e ".lighthttpd.local" ]; then
 	cat ".lighthttpd.local" >> $CONFIG
 fi
 
+if ! which lighttpd >/dev/null 2>&1; then
+	PATH=`dirname $0`/_lighttpd/sbin:$PATH
+fi
+
 echo "Starting lighthttpd on port $PORT.."
 lighttpd -f $CONFIG -D
 rm -f $CONFIG
