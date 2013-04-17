@@ -16,6 +16,8 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 17.04.2013
+#    Support for .tar.xz in deb archives
 #  - 12.12.2012
 #    Support for .tar.xz
 #  - 06.12.2012
@@ -242,6 +244,7 @@ class DEBFile(filetype): # {{{
 		if dataFile[-4:] == "lzma": compressionFlag = "--lzma"
 		elif dataFile[-3:] == "bz2": compressionFlag = "-j"
 		elif dataFile[-2:] == "gz": compressionFlag = "-z"
+		elif dataFile[-2:] == "xz": compressionFlag = "--lzma"
 		if answer == 0:
 			# Unpack data archive
 			return os.system("ar p %s %s | tar x %s -C %s" % (se(cls.file), dataFile, compressionFlag, se(destination))) == 0
