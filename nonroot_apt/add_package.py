@@ -16,7 +16,7 @@ def install(file, source, target_base):
 	real_file = os.path.join(source, "." + file)
 
 	if not os.path.isfile(real_file):
-		return
+		return True
 	target = os.path.join(target_base, "./" + file)
 	try:
 		os.makedirs(os.path.dirname(target))
@@ -24,6 +24,9 @@ def install(file, source, target_base):
 		pass
 	if not os.access(target, os.F_OK):
 		shutil.copy2(real_file, target)
+		return True
+	else:
+		return False
 
 def dependencies(package, source):
 	return ( x[x.find(": ") + 2:].strip().replace("<", "").replace(">", "") for x in os.popen("apt-cache -o RootDir=" + source + " depends " + package).readlines() if "Depends" in x )
@@ -37,9 +40,11 @@ def _install_single_package(package, source, target_base):
 			continue
 		_deps += [ dep ]
 		_install_single_package(dep, source, target_base)
-	print "Installing", package, "..."
-	for file in files(package, source):
-		install(file, source, target_base)
+	print "Installing", package, "... ",
+	if any(map(lambda x: install(x, source, target_base), files(package, source))):
+		print "Ok"
+	else:
+		print "already present"
 
 def install_packages(packages, source, target_base):
 	global _deps
