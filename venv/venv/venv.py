@@ -385,6 +385,20 @@ class SandboxProvider(VirtualEnvironmentProvider):#{{{
 			status("Failed to install sandbox", "err")
 		else:
 			status("Installed sandbox")
+
+		status("Installing libpwrapper")
+		with open(install_sh, "w") as file:
+			print >> file, "cd '%s' || exit 1" % (download_path.replace("'", r"\'"))
+			for sfile in ("libpwwrapper.c", "Makefile"):
+				print >> file, "wget 'https://raw.github.com/phillipberndt/scripts/master/venv/libpwwrapper/%s' || exit 1" % (sfile.replace("'", r"\'"))
+			print >> file, "make || exit 1"
+			print >> file, "mv libpwwrapper.so '%s/lib/libpwwrapper.so' || exit 1" % (install_path.replace("'", r"\'"))
+			print >> file, "exit 0"
+		if os.system("bash '%s'" % (install_sh)) != 0:
+			status("Failed to install libpwwrapper", "err")
+		else:
+			status("Installed libpwrapper")
+
 		os.system("rm -rf '%s'" % (download_path.replace("'", r"\'")))
 	
 	@staticmethod
@@ -398,6 +412,10 @@ class SandboxProvider(VirtualEnvironmentProvider):#{{{
 		if not library:
 			return False
 		add_ld_preload(library)
+		library = find_library("sandbox", "../lib/libpwwrapper.so")
+		if library:
+			# sic. This is optional, not everybody might have this.
+			add_ld_preload(library)
 		os.environ["SANDBOX_ACTIVE"] = "armedandready"
 		os.environ["SANDBOX_ON"] = "1"
 		os.environ["SANDBOX_PID"] = str(os.getpid())
