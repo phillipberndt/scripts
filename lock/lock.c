@@ -102,8 +102,7 @@ void main() {
 	XEvent xev;
 	char inputBuffer[4];
 	int passwordBufferLength = 0;
-	int n = 0;
-	while(++n < 3) {
+	while(True) {
 		// Read password
 		passwordBufferLength = 0;
 		while(True) {
