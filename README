@@ -92,3 +92,7 @@ Contents:
 * venv
   
   A tool to setup virtual environments for more than just python.
+
+* lock
+
+  A very simple X11 locking app. Screen blanking & PAM authentication only.
