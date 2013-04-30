@@ -16,9 +16,11 @@ read YES
 echo
 cd $HOME
 
-if grep -q pberndt .ssh/id_rsa.pub >/dev/null 2>&1; then
+if grep -q pberndt .ssh/id_rsa.pub >/dev/null 2>&1 && git ls-remote git@github.com:phillipberndt/scripts 2>&1 > /dev/null; then
+	echo "Cloning using r/w SSH connection ..."
 	CLONE_BASE=git@github.com:phillipberndt/
 else
+	echo "Cloning using read-only git connection ..."
 	CLONE_BASE=git://github.com/phillipberndt/
 fi
 
