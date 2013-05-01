@@ -10,7 +10,7 @@
  * !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
  *
  * Compile with
- *  cc lock.c -lX11 -lpam
+ *  cc lock.c -lX11 -lpam -lXext
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -37,6 +37,7 @@
 #include <X11/keysymdef.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/extensions/dpms.h>
 #include <security/pam_appl.h>
 #include <pwd.h>
 
@@ -78,6 +79,9 @@ void main() {
 	XMapWindow(display, w);
 	XRaiseWindow(display, w);
 	XSync(display, False);
+	
+	// Wait for the WM to settle..
+	sleep(1);
 
 	// Grab Pointer & Keyboard
 	for(int tries=0; XGrabPointer(display, w, False, ButtonPressMask | ButtonReleaseMask | EnterWindowMask | LeaveWindowMask | PointerMotionMask, GrabModeAsync, GrabModeAsync, w, None, CurrentTime) != GrabSuccess; tries++) {
@@ -96,6 +100,9 @@ void main() {
 	XSetWindowBackground(display, w, 0);
 	XClearWindow(display, w);
 	XSync(display, False);
+
+	// Disable screen
+	DPMSForceLevel(display, DPMSModeOff);
 
 	// Read password from keyboard events,
 	// verify, loop where required
