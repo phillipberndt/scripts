@@ -16,6 +16,9 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 12.05.2013
+#    Replaced generator by more flexible approach using environment variables
+#    Added bz2 and gz support
 #  - 08.05.2013
 #    Fixed CPIO and RPM support
 #  - 17.04.2013
@@ -140,7 +143,7 @@ class filetype(object): # {{{
 		"""
 		raise Exception("You need to override unpack")
 # }}}
-def defaultTypeGenerator(regexExtension, regexMime, program, command, fileBeforeDestination=True): # {{{
+def defaultTypeGenerator(regexExtension, regexMime, program, command): # {{{
 	"""
 		Generate a default implementation of the filetype-class.
 		TYPE_DEF and TYPE_REQUIRES are the first two parameters. Depending on
@@ -157,31 +160,36 @@ def defaultTypeGenerator(regexExtension, regexMime, program, command, fileBefore
 				params = parameters["parameters"]
 			else:
 				params = ""
-			if fileBeforeDestination:
-				return os.system(command % (params, se(cls.file), se(destination))) == 0
-			else:
-				return os.system(command % (params, se(destination), se(cls.file))) == 0
+			os.environ["PARAMS"] = params
+			os.environ["FILE"] = cls.file
+			os.environ["DEST"] = destination
+			return os.system(command) == 0
 	return tmpcls
 # }}}
 
 
 # Various file types
-RARFile = defaultTypeGenerator(r"\.rar", "application/x-rar", "unrar", "unrar x %s %s %s", True)
-TARLZMAFile = defaultTypeGenerator(r"\.tar\.(lzma|xz)", "^$", "tar", "tar x %s --lzma -C %s -f %s", False)
-TBZFile = defaultTypeGenerator(r"\.(tbz|tar\.bz2?)", "application/x-tar.+application/x-bzip2", "tar", "tar xj %s -C %s -f %s", False)
-TGZFile = defaultTypeGenerator(r"\.(tgz|tar\.g?z)", "application/x-tar.+application/x-gzip", "tar", "tar xz %s -C %s -f %s", False)
-TGZFile = defaultTypeGenerator(r"\.tar\.xz", "application/x-tar.+application/x-xz", "tar", "tar x %s --lzma -C %s -f %s", False)
-TARFile = defaultTypeGenerator(r"\.tar", "application/x-tar", "tar", "tar x %s -C %s -f %s", False)
-CABFile = defaultTypeGenerator(r"\.cab", "^$", "cabextract", "cabextract %s -d %s %s", False)
-LHAFile = defaultTypeGenerator(r"\.lha", "application/x-lha", "lha", "lha x %s -w=%s %s", False)
-ARJFile = defaultTypeGenerator(r"\.arj", "application/x-arj", "arj", "arj x %s %s %s", True)
-CPIOfile = defaultTypeGenerator(r"\.cpio", "application/x-cpio", "cpio", "PARAMS='%s'; cat %s | (cd %s && cpio -i --no-absolute-filenames --make-directories $PARAMS)", True)
-ISOFile = defaultTypeGenerator(r"\.iso", "application/x-iso9660", "7zr", "7zr x %s -o%s %s", False)
+RARFile = defaultTypeGenerator(r"\.rar", "application/x-rar", "unrar", "unrar x $PARAMS $FILE $DEST")
+TARLZMAFile = defaultTypeGenerator(r"\.tar\.(lzma|xz)", "^$", "tar", "tar x $PARAMS --lzma -C $DEST -f $FILE")
+TBZFile = defaultTypeGenerator(r"\.(tbz|tar\.bz2?)", "application/x-tar.+application/x-bzip2", "tar", "tar xj `echo $PARAMS` -C $DEST -f $FILE")
+TGZFile = defaultTypeGenerator(r"\.(tgz|tar\.g?z)", "application/x-tar.+application/x-gzip", "tar", "tar xz `echo $PARMAS` -C $DEST -f $FILE")
+TGZFile = defaultTypeGenerator(r"\.tar\.xz", "application/x-tar.+application/x-xz", "tar", "tar x `echo $PARAMS` --lzma -C $DEST -f $FILE")
+TARFile = defaultTypeGenerator(r"\.tar", "application/x-tar", "tar", "tar x `echo $PARAMS` -C $DEST -f $FILE")
+CABFile = defaultTypeGenerator(r"\.cab", "^$", "cabextract", "cabextract `echo $PARAMS` -d $DEST $FILE")
+LHAFile = defaultTypeGenerator(r"\.lha", "application/x-lha", "lha", "lha x `echo $PARAMS` -w=$DEST $FILE")
+ARJFile = defaultTypeGenerator(r"\.arj", "application/x-arj", "arj", "arj x `echo $PARAMS` $FILE $DEST")
+CPIOfile = defaultTypeGenerator(r"\.cpio", "application/x-cpio", "cpio", "cat $FILE | (cd $DEST && cpio -i --no-absolute-filenames --make-directories `echo $PARAMS`)")
+ISOFile = defaultTypeGenerator(r"\.iso", "application/x-iso9660", "7zr", "7zr x `echo $PARAMS` -o$DEST $FILE")
+BZ2File = defaultTypeGenerator(r"\.bz2", "application/x-bzip2", "bzip2", "cat $FILE | (cd $DEST; bzip2 -d `echo $PARAMS` > `basename $FILE .bz2`)")
+GZFile = defaultTypeGenerator(r"\.bz2", "application/x-gzip", "gzip", "cat $FILE | (cd $DEST; gzip -d `echo $PARAMS` > `basename $FILE .gz`)")
 sevenZExecutable = "7zr"
 if os.system("which 7zr >/dev/null") != 0:
-	sevenZExecutable = "7z"
-SEVENZFile = defaultTypeGenerator(r"\.7z", "^$", sevenZExecutable, sevenZExecutable + " x %s -o%s %s", False)
-MSIFile = defaultTypeGenerator(r"\.msi", "", sevenZExecutable, sevenZExecutable + " x %s -o%s %s", False)
+	if os.system("which 7za >/dev/null") == 0:
+		sevenZExecutable = "7za"
+	else:
+		sevenZExecutable = "7z"
+SEVENZFile = defaultTypeGenerator(r"\.7z", "^$", sevenZExecutable, sevenZExecutable + " x `echo $PARAMS` -o$DEST $FILE")
+MSIFile = defaultTypeGenerator(r"\.msi", "", sevenZExecutable, sevenZExecutable + " x `echo $PARAMS` -o$DEST $FILE")
 class ZIPFile(filetype): # {{{
 	TYPE_DEF = r"\.(?:zip|jar)"
 	TYPE_MIME_DEF = "application/(?:x-)?zip"
