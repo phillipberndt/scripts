@@ -16,6 +16,8 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 14.05.2013
+#    Fixed xz support
 #  - 12.05.2013
 #    Replaced generator by more flexible approach using environment variables
 #    Added bz2 and gz support
@@ -170,7 +172,7 @@ def defaultTypeGenerator(regexExtension, regexMime, program, command): # {{{
 
 # Various file types
 RARFile = defaultTypeGenerator(r"\.rar", "application/x-rar", "unrar", "unrar x $PARAMS $FILE $DEST")
-TARLZMAFile = defaultTypeGenerator(r"\.tar\.(lzma|xz)", "^$", "tar", "tar x $PARAMS --lzma -C $DEST -f $FILE")
+TARLZMAFile = defaultTypeGenerator(r"\.tar\.lzma", "application/x-tar.+application/x-lzma", "tar", "tar x $PARAMS --lzma -C $DEST -f $FILE")
 TBZFile = defaultTypeGenerator(r"\.(tbz|tar\.bz2?)", "application/x-tar.+application/x-bzip2", "tar", "tar xj `echo $PARAMS` -C $DEST -f $FILE")
 TGZFile = defaultTypeGenerator(r"\.(tgz|tar\.g?z)", "application/x-tar.+application/x-gzip", "tar", "tar xz `echo $PARMAS` -C $DEST -f $FILE")
 TGZFile = defaultTypeGenerator(r"\.tar\.xz", "application/x-tar.+application/x-xz", "tar", "tar x `echo $PARAMS` --lzma -C $DEST -f $FILE")
@@ -255,7 +257,7 @@ class DEBFile(filetype): # {{{
 		if dataFile[-4:] == "lzma": compressionFlag = "--lzma"
 		elif dataFile[-3:] == "bz2": compressionFlag = "-j"
 		elif dataFile[-2:] == "gz": compressionFlag = "-z"
-		elif dataFile[-2:] == "xz": compressionFlag = "--lzma"
+		elif dataFile[-2:] == "xz": compressionFlag = "--xz"
 		if answer == 0:
 			# Unpack data archive
 			return os.system("ar p %s %s | tar x %s -C %s" % (se(cls.file), dataFile, compressionFlag, se(destination))) == 0
