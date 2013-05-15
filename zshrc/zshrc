@@ -99,6 +99,20 @@ gitup() {
 		cd ..
 	done
 }
+mktmp() {
+	TDIR=/tmp/tmp-$RANDOM
+	while ! [ -d $TDIR ]; do
+		mkdir -m 0711 $TDIR && break
+		TDIR=/tmp/tmp-$RANDOM
+	done
+	echo Entering $TDIR. This directory will be deleted once you exit the subshell.
+	(
+		cd $TDIR
+		IS_TMP_SUBSHELL=1 zsh
+	)
+	rm -rf $TDIR
+}
+[ -z $IS_TMP_SUBSHELL ] || export PS1="[tmp] $PS1"
 
 # Hook: Local .zshrc's
 set -A _chpwd_local_zshrc_cache
