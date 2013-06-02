@@ -188,9 +188,8 @@ if [ "$PWD" = "/" ]; then
 fi
 
 # Set the $DISPLAY variable if it is not set and the user has an open session
-# TODO Maybe replace this with consolekit someday
-if [ -z "$DISPLAY" -a -e "/proc/`pgrep -u $USER dbus-daemon`/environ" ]; then
-	export DISPLAY=$(cat /proc/`pgrep -u $USER dbus-daemon`/environ | tr "\0" "\n" | sed -ne 's/DISPLAY=//p')
+if [ -z "$DISPLAY" ]; then
+	eval `ck-list-sessions | awk "/^Session/{right=0} /unix-user = '$UID'/{right=1} /x11-display = '(.+)'/{ if(right == 1) printf(\"DISPLAY=%s\n\", \$3); }";`
 fi
 
 # Show a todo list after startup
