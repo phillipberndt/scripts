@@ -6,10 +6,13 @@
 # Use debian packages on (non-debian) distributions as a non-root user
 #
 import anydbm
+import ctypes
 import getopt
+import glob
 import gzip
 import math
 import os
+import re
 import sys
 import tempfile
 import urllib
@@ -206,15 +209,84 @@ for package in args:
 	install += [ package ]
 
 # Resolve dependencies
+_version_vodoo_libs = []
+def _version_vodoo_read(config):
+	global _version_vodoo_libs
+	try:
+		lines = open(config).readlines()
+	except:
+		return
+	for line in lines:
+		line = line.strip()
+		if line[:8] == "include ":
+			for file in glob.glob(line[8:]):
+				_version_vodoo_read(file)
+		elif os.path.isdir(line):
+			_version_vodoo_libs += os.listdir(line)
+
+def _version_vodoo_cmp(version1, version2):
+	def normalize(v):
+		return [int(x) for x in re.sub(r'(\.0+)*$','', v).split(".")]
+	return cmp(normalize(version1), normalize(version2))
+
+def _version_vodoo_ver(package):
+	verstring = re.search("(^.+\.so)\.([0-9\.]+)$", package)
+	if verstring:
+		return [verstring.group(1), verstring.group(2)]
+	verstring = re.search("(^.+)-([0-9\.]+).so$", package)
+	if verstring:
+		return [verstring.group(1), verstring.group(2)]
+	return False
+
+def version_vodoo(package):
+	global _version_vodoo_libs
+	if not _version_vodoo_libs:
+		_version_vodoo_read("/etc/ld.so.conf")
+
+	ver = _version_vodoo_ver(package)
+	if not ver:
+		return []
+	base, p_version = ver
+	def _filter(candidate):
+		if base not in candidate:
+			return False
+		ver = _version_vodoo_ver(candidate)
+		if not ver:
+			return False
+		c_base, c_version = ver
+		return _version_vodoo_cmp(c_version, p_version) >= 0
+	return filter(_filter, _version_vodoo_libs)
+
 def is_installed(package):
 	if "contents-" + package not in source_db:
+		print "[%20s] No source information" % (package)
 		return False
 	files = 0
 	files_ok = 0
 	for p_file in source_db["contents-" + package].split("\n"):
+		if any(( ignore in p_file for ignore in ("usr/share/doc", "usr/share/man", "usr/share/help") )):
+			continue
+
 		files += 1
 		if ("-g" not in oopts and os.access(os.path.join("/", p_file), os.F_OK)) or os.access(os.path.join(target, p_file), os.F_OK):
 			files_ok += 1
+		else:
+			if (p_file[:4] == "lib/" or "/lib" in p_file) and ".so" in p_file:
+				# Try to load directly, also search for newer versions
+				exists = False
+				basename = os.path.basename(p_file)
+				for version in version_vodoo(basename):
+					try:
+						ctypes.CDLL(version)
+						exists = True
+						# print "[%20s] Use %-40s for %-40s" % (package, basename, version)
+						break
+					except:
+						pass
+				if exists:
+					files_ok += 1
+					continue
+			print "[%20s] Missing %s" % (package, p_file)
 	return (files > 10 and files - files_ok < 5) or files_ok == files
 
 did_deps = True
@@ -256,14 +328,14 @@ for package in install:
 		downloads += [ source_db["source-" + package].split("|") ]
 
 if downloads:
-	print "I will install to", target, ":"
-	print
-	for i in range(len(downloads)):
-		print " %02d) %s" % (i, downloads[i][0])
-	print
-	print "Any objections, Lady? [<number> to remove that package, <enter> to proceed]",
 	downloads = dict(zip(range(len(downloads)), downloads))
 	while True:
+		print "I will install to", target, ":"
+		print
+		for i in range(len(downloads)):
+			print " %02d) %s" % (i, downloads[i][0])
+		print
+		print "Any objections, Lady? [<number> to remove that package, <enter> to proceed]",
 		cmd = raw_input().strip()
 		if cmd.isdigit():
 			if int(cmd) in downloads:

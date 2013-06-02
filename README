@@ -90,6 +90,7 @@ Contents:
      tracking for already satisfied dependencies.
   2) A script to copy already installed packages and all their dependencies
      into a given directory. Useful to set up chroots.
+  3) A script to use apt repositories from non-Debian distributions
 
 * venv
   
