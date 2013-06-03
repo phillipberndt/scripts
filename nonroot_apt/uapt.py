@@ -59,6 +59,7 @@ except:
 	print "Usage: uapt [-g] [-d directory] [-u] [-s source -s source ..] <package(s)>"
 	print " directory defaults to ~/.local"
 	print " source defaults to sources.list or, if unavailable, `deb http://ftp.de.debian.org/debian/ wheezy main contrib non-free'"
+	print "  sources are cached. New sources don't override old sources unless -u is given."
 	print " use -u to update the sources, otherwise the cache is used."
 	print " use -g to ignore globally fulfiled dependencies."
 	sys.exit(1)
@@ -79,7 +80,9 @@ if not os.path.isdir(uapt_dir):
 
 # Read sources list
 sources = [ line[1] for line in opts if line[0] == "-s" ]
+auto_sources = False
 if not sources:
+	auto_sources = True
 	if os.access("/etc/apt/sources.list", os.F_OK):
 		sources = [ x.strip() for x in open("/etc/apt/sources.list").readlines() if x[:4] == "deb " ]
 	elif os.access(uapt_dir + "sources", os.F_OK):
@@ -95,15 +98,19 @@ except:
 	print "Unknown arch, please configure manually in source-code. Only x86 64/32 are supported right now, sorry!"
 
 # Fetch sources
-do_update = "-u" in oopts or not os.access(uapt_dir + "/packages", os.F_OK)
+do_update = "-u" in oopts or not os.access(uapt_dir + "/packages", os.F_OK) or not auto_sources
 source_db = {}
-if not do_update:
+if not auto_sources or not do_update:
 	print "Loading database.."
 	sys.stdout.flush()
 	source_db = pickle.load(bz2.BZ2File(uapt_dir + "/packages", "r"))
 if do_update:
 	print "Updating sources database ..."
 	for source in sources:
+		try:
+			source_db["uapt-sources"] += [ source.strip() ]
+		except KeyError:
+			source_db["uapt-sources"] = [ source.strip() ]
 		source = source.strip().split()
 		if source[0] != "deb":
 			continue
@@ -125,9 +132,10 @@ if do_update:
 					continue
 				the_file = " ".join(split[:-1])
 				package = split[-1]
-				if package not in packages:
-					packages[package] = []
-				packages[package].append(the_file)
+				try:
+					packages[package].append(the_file)
+				except KeyError:
+					packages[package] = [ the_file ]
 			for package in packages:
 				if "/" in package:
 					display_package = package[package.find("/")+1:]
@@ -162,9 +170,9 @@ if do_update:
 					if "Provides" in entries:
 						for provided in entries["Provides"].split(","):
 							prov_key = "providers-" + provided.strip()
-							if prov_key in source_db:
+							try:
 								source_db[prov_key] += "\n" + package
-							else:
+							except KeyError:
 								source_db[prov_key] = package
 					if "SHA1" in entries:
 						source_db["source-" + package] = os.path.join(source[1], entries["Filename"]) + "|" + entries["SHA1"]
@@ -199,6 +207,16 @@ if do_update:
 	pickle.dump(source_db, bz2.BZ2File(uapt_dir + "/packages", "w"), pickle.HIGHEST_PROTOCOL)
 
 # TODO Store source lines
+
+# If no args are given, display some stats and exit
+if not args:
+	source_db["uapt-sources"] = list(set(source_db["uapt-sources"]))
+	print "My database currently holds %d packages from the %d following sources:" % (len(filter(lambda x: x[:7] == "source-", source_db)), len(source_db["uapt-sources"]))
+	print " - %s" % ("\n - ".join(source_db["uapt-sources"]))
+	print
+	print "Use uapt -h for help."
+	print
+	sys.exit(0)
 
 # Select packages to install
 install = []
