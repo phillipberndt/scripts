@@ -73,7 +73,7 @@ if not os.path.isdir(uapt_dir):
 	os.mkdir(uapt_dir)
 
 # Read sources list
-sources = [ line[1] for line in opts if opts[0] == "-s" ]
+sources = [ line[1] for line in opts if line[0] == "-s" ]
 if not sources:
 	if os.access("/etc/apt/sources.list", os.F_OK):
 		sources = [ x.strip() for x in open("/etc/apt/sources.list").readlines() if x[:4] == "deb " ]
