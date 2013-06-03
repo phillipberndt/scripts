@@ -161,7 +161,10 @@ if do_update:
 								source_db[prov_key] += "\n" + package
 							else:
 								source_db[prov_key] = package
-					source_db["source-" + package] = os.path.join(source[1], entries["Filename"]) + "|" + entries["SHA1"]
+					if "SHA1" in entries:
+						source_db["source-" + package] = os.path.join(source[1], entries["Filename"]) + "|" + entries["SHA1"]
+					else:
+						source_db["source-" + package] = os.path.join(source[1], entries["Filename"])
 					deps = ""
 					deps_array = []
 					if "Depends" in entries:
@@ -264,6 +267,7 @@ def is_installed(package):
 		return False
 	files = 0
 	files_ok = 0
+	missing = 0
 	for p_file in source_db["contents-" + package].split("\n"):
 		if any(( ignore in p_file for ignore in ("usr/share/doc", "usr/share/man", "usr/share/help") )):
 			continue
@@ -280,14 +284,18 @@ def is_installed(package):
 					try:
 						ctypes.CDLL(version)
 						exists = True
-						# print "[%20s] Use %-40s for %-40s" % (package, basename, version)
+						print "[%20s] Use %-40s for %-40s" % (package, basename, version)
 						break
 					except:
 						pass
 				if exists:
 					files_ok += 1
 					continue
-			print "[%20s] Missing %s" % (package, p_file)
+			missing += 1
+			if missing < 5:
+				print "[%20s] Missing %s" % (package, p_file)
+			elif missing == 10:
+				print "[%20s] (Further missing files listing suppressed)" % (package)
 	return (files > 10 and files - files_ok < 5) or files_ok == files
 
 did_deps = True
@@ -350,9 +358,10 @@ if downloads:
 if downloads:
 	for file in downloads:
 		tmp = download(file[0])
-		chksum = os.popen("sha1sum %s" % tmp).read().strip().split()[0]
-		if chksum != file[1]:
-			print "Warning: SHA1 mismatch!\nExpected: %s\n   Found: %s" % (file[1], chksum)
+		if len(file) > 1:
+			chksum = os.popen("sha1sum %s" % tmp).read().strip().split()[0]
+			if chksum != file[1]:
+				print "Warning: SHA1 mismatch!\nExpected: %s\n   Found: %s" % (file[1], chksum)
 		dl_type = os.popen("ar t %s | grep data" % tmp).read().strip()
 		if ".tar.xz" in dl_type or ".tar.lzma" in dl_type:
 			c_flag = "--lzma"
