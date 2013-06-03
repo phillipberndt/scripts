@@ -362,20 +362,29 @@ for package in install:
 
 if downloads:
 	downloads = dict(zip(range(len(downloads)), downloads))
-	while True:
-		print "I will install to", target, ":"
-		print
-		for i in range(len(downloads)):
-			print " %02d) %s" % (i, downloads[i][0])
-		print
-		print "Any objections, Lady? [<number> to remove that package, <enter> to proceed]",
-		cmd = raw_input().strip()
-		if cmd.isdigit():
-			if int(cmd) in downloads:
-				print "Ok, %s removed. What now?" % (downloads[int(cmd)][0]),
-				del downloads[int(cmd)]
-		else:
-			break
+	if os.system("which zenity >/dev/null 2>&1") == 0 and "DISPLAY" in os.environ:
+		ids = os.popen('zenity --list --checklist --multiple --text="Choose packages" --column=Install --column=id --hide-column=2 --column=Package ' + 
+			" ".join([ 'TRUE ' + str(key) + ' "' + val[0].replace('"', r'\"') + '"' for key, val in downloads.items() ])).read().split("|")
+		use = {}
+		for id in ids:
+			if id:
+				use[int(id)] = downloads[int(id)]
+		downloads = use
+	else:
+		while True:
+			print "I will install to", target, ":"
+			print
+			for i in range(len(downloads)):
+				print " %02d) %s" % (i, downloads[i][0])
+			print
+			print "Any objections, Lady? [<number> to remove that package, <enter> to proceed]",
+			cmd = raw_input().strip()
+			if cmd.isdigit():
+				if int(cmd) in downloads:
+					print "Ok, %s removed. What now?" % (downloads[int(cmd)][0]),
+					del downloads[int(cmd)]
+			else:
+				break
 	downloads = downloads.values()
 	print
 	
