@@ -5,6 +5,11 @@
 #
 # Use debian packages on (non-debian) distributions as a non-root user
 #
+try:
+	import cPickle as pickle
+except:
+	import pickle
+import bz2
 import anydbm
 import ctypes
 import getopt
@@ -91,11 +96,11 @@ except:
 
 # Fetch sources
 do_update = "-u" in oopts or not os.access(uapt_dir + "/packages", os.F_OK)
-if do_update:
-	# Always start with a fresh database
-	try: os.unlink(uapt_dir + "/packages")
-	except: pass
-source_db = anydbm.open(uapt_dir + "/packages", "c")
+source_db = {}
+if not do_update:
+	print "Loading database.."
+	sys.stdout.flush()
+	source_db = pickle.load(bz2.BZ2File(uapt_dir + "/packages", "r"))
 if do_update:
 	print "Updating sources database ..."
 	for source in sources:
@@ -191,6 +196,7 @@ if do_update:
 							parts += [ part.strip() ]
 						deps += "|".join(parts) + "\n"
 					source_db["deps-" + package] = deps
+	pickle.dump(source_db, bz2.BZ2File(uapt_dir + "/packages", "w"), pickle.HIGHEST_PROTOCOL)
 
 # TODO Store source lines
 
@@ -372,5 +378,3 @@ if downloads:
 		if os.system("ar p %s %s | tar -x %s -C %s" % (tmp, dl_type, c_flag, target)) != 0:
 			print "Warning: Unpacking failed."
 		os.unlink(tmp)
-
-source_db.close()
