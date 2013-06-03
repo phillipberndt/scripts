@@ -93,7 +93,8 @@ except:
 do_update = "-u" in oopts or not os.access(uapt_dir + "/packages", os.F_OK)
 if do_update:
 	# Always start with a fresh database
-	os.unlink(uapt_dir + "/packages")
+	try: os.unlink(uapt_dir + "/packages")
+	except: pass
 source_db = anydbm.open(uapt_dir + "/packages", "c")
 if do_update:
 	print "Updating sources database ..."
