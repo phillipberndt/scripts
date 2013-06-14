@@ -400,8 +400,10 @@ if downloads:
 			c_flag = "--lzma"
 		elif ".tar.gz" in dl_type:
 			c_flag = "-z"
-		elif ".tar.bzip2" in dl_type:
+		elif ".tar.bz2" in dl_type:
 			c_flag = "-j"
+		else:
+			print "Unknown ", dl_type
 		if os.system("ar p %s %s | tar -x %s -C %s" % (tmp, dl_type, c_flag, target)) != 0:
 			print "Warning: Unpacking failed."
 		os.unlink(tmp)
