@@ -235,6 +235,7 @@ for package in args:
 			print package, "not found. Candidates are: ", ", ".join(candidates[:10])
 			continue
 	install += [ package ]
+install_force = install[:]
 
 # Resolve dependencies
 _version_vodoo_libs = []
@@ -286,6 +287,8 @@ def version_vodoo(package):
 	return filter(_filter, _version_vodoo_libs)
 
 def is_installed(package):
+	if package in install_force:
+		return False
 	if "contents-" + package not in source_db:
 		print "[%20s] No source information" % (package)
 		return False
