@@ -32,6 +32,7 @@
 #define XK_MISCELLANY
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
 #include <X11/keysymdef.h>
@@ -52,7 +53,19 @@ int pam_nocomm(int n, const struct pam_message **query, struct pam_response **re
 	return PAM_SUCCESS;
 }
 
-void main() {
+int main(int argc, char *argv[]) {
+	// Minimal options
+	char fullscreen = 1;
+	if(argc != 1) {
+		if(strcmp(argv[1], "-h") == 0) {
+			printf("lock. Use -n to not go to leave the desktop visible\n");
+			return 0;
+		}
+		if(strcmp(argv[1], "-n") == 0) {
+			fullscreen = 0;
+		}
+	}
+
 	// Open Display
 	Display *display = XOpenDisplay(NULL);
 	XSetCloseDownMode(display, DestroyAll);
@@ -74,7 +87,12 @@ void main() {
 
 	XWindowAttributes xwa;
 	XGetWindowAttributes(display, DefaultRootWindow(display), &xwa);
-	XMoveResizeWindow(display, w, 0, 0, xwa.width, xwa.height);
+	if(fullscreen == 1) {
+		XMoveResizeWindow(display, w, 0, 0, xwa.width, xwa.height);
+	}
+	else {
+		XMoveResizeWindow(display, w, 0, 0, 1, 1);
+	}
 
 	XMapWindow(display, w);
 	XRaiseWindow(display, w);
@@ -102,7 +120,9 @@ void main() {
 	XSync(display, False);
 
 	// Disable screen
-	DPMSForceLevel(display, DPMSModeOff);
+	if(fullscreen == 1) {
+		DPMSForceLevel(display, DPMSModeOff);
+	}
 
 	// Read password from keyboard events,
 	// verify, loop where required
@@ -150,4 +170,5 @@ void main() {
 	XUnmapWindow(display, w);
 	XUngrabServer(display);
 	XFlush(display);
+	return 0;
 }
