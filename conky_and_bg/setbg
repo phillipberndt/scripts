@@ -31,8 +31,9 @@ FILES=(`ls ~/.bg/* | grep -E "(jpg|png|jpeg)$"`)
 SCREEN_WIDTH=`xrandr --current 2>&1 | sed -rne 's/.+current ([0-9]+) x ([0-9]+).+/\1/p'`
 WIDTH=`xdotool getdisplaygeometry | awk '{print $1}'`
 HEIGHT=`xdotool getdisplaygeometry | awk '{print $2}'`
-CLIP=$(($WIDTH - 580))
+CLIP=$(($WIDTH - 520))
 F1T=$(mktemp /tmp/tmp.XXXXXX.png)
+ALPHA=.7
 
 F1=$FILES[$(( $RANDOM * (${#FILES}) / 32767 + 1))]
 
@@ -48,7 +49,7 @@ if [ $WIDTH -lt $SCREEN_WIDTH ]; then
 	`
 
 	IMG_SIZE=(`identify $F1 | sed -re 's/.+ ([0-9]+)x([0-9]+).+/\1 \2/'`)
-	convert $F1\[$(($IMG_SIZE[1]-$CLIP))x$IMG_SIZE[2]+$CLIP+0\] -strokewidth 0 -fill "rgba(255, 255, 255, 0.3)" -draw "rectangle 0,0 $CLIP,$IMG_SIZE[1]" -fill "black" -draw "rectangle 0,0 .5,$IMG_SIZE[1]" $F1T
+	convert $F1\[$(($IMG_SIZE[1]-$CLIP))x$IMG_SIZE[2]+$CLIP+0\] -strokewidth 0 -fill "rgba(255, 255, 255, $ALPHA)" -draw "rectangle 0,0 $CLIP,$IMG_SIZE[1]" -fill "black" -draw "rectangle 0,0 .5,$IMG_SIZE[1]" $F1T
 	xli -quiet -onroot -at $WIDTH,0 $F1 -onroot -clip 0,0,$WIDTH,$HEIGHT $F2 -onroot -at $(($WIDTH+$CLIP)),0 $F1T
 	rm -f $F1T
 
@@ -56,7 +57,7 @@ else
 	# Single screen
 	
 	IMG_SIZE=(`identify $F1 | sed -re 's/.+ ([0-9]+)x([0-9]+).+/\1 \2/'`)
-	convert $F1\[$(($IMG_SIZE[1]-$CLIP))x$IMG_SIZE[2]+$CLIP+0\] -strokewidth 0 -fill "rgba(255, 255, 255, 0.3)" -draw "rectangle 0,0 $CLIP,$IMG_SIZE[1]" -fill "black" -draw "rectangle 0,0 .5,$IMG_SIZE[1]" $F1T
+	convert $F1\[$(($IMG_SIZE[1]-$CLIP))x$IMG_SIZE[2]+$CLIP+0\] -strokewidth 0 -fill "rgba(255, 255, 255, $ALPHA)" -draw "rectangle 0,0 $CLIP,$IMG_SIZE[1]" -fill "black" -draw "rectangle 0,0 .5,$IMG_SIZE[1]" $F1T
 	xli -quiet -onroot -at 0,0 $F1 -onroot -at $CLIP,0 $F1T
 	rm -f $F1T
 fi

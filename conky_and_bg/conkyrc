@@ -6,7 +6,7 @@
 use_xft yes
 xftfont verdana:size=8
 alignment top_right
-gap_x 100
+gap_x 10
 gap_y 50
 xftalpha 0.8
 own_window yes
@@ -48,7 +48,12 @@ ${execpi 600 ~/.apps/conky_weather.py}
    ${font StyleBats:size=16}A${font}  CPU0: ${cpu cpu0}% ${cpubar cpu0}
    ${font StyleBats:size=16}A${font}  CPU1: ${cpu cpu1}% ${cpubar cpu1}
 
-   ${font PizzaDude Bullets:size=16}J${font}   $mem / $memmax
+         ${color}Name                        PID        CPU%     MEM%
+         ${font Monospace:size=8}${top name 1}     ${top pid 1}  ${top cpu 1}  ${top mem 1}
+      ${top name 2}     ${top pid 2}  ${top cpu 2}  ${top mem 2}
+      ${top name 3}     ${top pid 3}  ${top cpu 3}  ${top mem 3}
+
+  ${font PizzaDude Bullets:size=16}J${font}   $mem / $memmax
 
    ${font StyleBats:size=18}P${font}  Work:  ${uptime_short}
 
