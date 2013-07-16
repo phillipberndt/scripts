@@ -22,7 +22,7 @@ setup(
 			"venv = venv.venv:main"
 		]
 	},
-	long_description = read('README'),
+	long_description = read('README.markdown'),
 	classifiers=[
 		"Development Status :: 3 - Alpha",
 		"Topic :: Utilities",
