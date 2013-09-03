@@ -558,7 +558,7 @@ def downloadHook(fkt):
 @downloadHook
 def hookURLDownload(file):
 	"""
-		Download URLs using curl/wget or python urllib
+		Download URLs using axel/curl/wget or python urllib
 	"""
 	if re.match(r"^[a-zA-Z]+:\/\/.+", file):
 		sout("good", "URL detected. Downloading")
@@ -569,7 +569,9 @@ def hookURLDownload(file):
 				counter += 1
 			targetFile = "%d-%s" % (counter, targetFile)
 		success = False
-		if os.system("which curl >/dev/null") == 0:
+		if os.system("which axel >/dev/null") == 0:
+			success = os.system("axel -a -o %s %s" % (se(targetFile), se(file))) == 0
+		elif os.system("which curl >/dev/null") == 0:
 			success = os.system("curl -Lo %s %s" % (se(targetFile), se(file))) == 0
 		elif not os.system("which wget >/dev/null") == 0:
 			success = os.system("wget -O %s %s" % (se(targetFile), se(file))) == 0
