@@ -103,7 +103,10 @@ source_db = {}
 if not auto_sources or not do_update:
 	print "Loading database.."
 	sys.stdout.flush()
-	source_db = pickle.load(bz2.BZ2File(uapt_dir + "/packages", "r"))
+	if os.access(uapt_dir + "/packages", os.F_OK):
+		source_db = pickle.load(bz2.BZ2File(uapt_dir + "/packages", "r"))
+	else:
+		source_db = {}
 if do_update:
 	print "Updating sources database ..."
 	for source in sources:
