@@ -8,7 +8,7 @@ use Term::ProgressBar;
 use Pod::Usage;
 
 # Load options
-use vars qw($test $progress $caseSensitive $wantHelp);
+use vars qw($test $progress $caseSensitive $wantHelp $matchParts);
 my $directory = ".";
 Getopt::Long::Configure ("bundling", "no_getopt_compat", "prefix_pattern=--|-");
 GetOptions(
@@ -16,6 +16,7 @@ GetOptions(
 	"proress|p!" => \$progress,
 	"directory|d:s" => \$directory,
 	"case-sensitive|s!" => \$caseSensitive,
+	"fuzzy|f!" => \$matchParts,
 	"help|h!" => \$wantHelp,
 );
 pod2usage({ exitval => 1, msg => "gdo Usage:\n gdo [options] <search pattern> +<anded-search-pattern> [<substitution>]\n" }) if $wantHelp or $#ARGV < 0;
@@ -25,10 +26,24 @@ while($#ARGV != -1 and $ARGV[0] =~ m/^\+/) {
 	push @ands, substr(shift @ARGV, 1);
 }
 if($#ARGV == -1) {
-	push @ARGV, qw(echo %0); 
+	push @ARGV, qw(echo %0);
 }
 if("@ARGV" !~ m/\$|%/) {
 	push @ARGV, "%0";
+}
+
+if($matchParts) {
+	foreach my $value (@ands) {
+		$value =~ s/./$&.*/g;
+	}
+	$search =~ s/./$&.*/g;
+}
+
+if($caseSensitive) {
+	foreach my $value (@ands) {
+		$value = "(?-i)" . $value;
+	}
+	$search = "(?-i)" . $search;
 }
 
 # The match function
@@ -37,9 +52,6 @@ sub match {
 
 	my $file = $_;
 
-	if($caseSensitive) {
-		$search = "(?i)" . $search;
-	}
 	$file =~ m/(?i)$search/ || return;
 	for (@ands) {
 		$file =~ m/(?i)$_/ || return;
@@ -72,7 +84,7 @@ sub match {
 
 # Exit after 2 Sig int's
 my $chldReceived = 0;
-sub exiter { 
+sub exiter {
 	$chldReceived = 0 if $chldReceived < 0;
 	$chldReceived += 2;
 	if($chldReceived == 2) {
@@ -91,10 +103,9 @@ if($progress) {
 
 	my @fileList;
 	sub buildProgress {
-		if($caseSensitive) {
-			return unless -f and m/$search/;
-		} else {
-			return unless -f and m/$search/i;
+		return unless -f and m/(?i)$search/;
+		for (@ands) {
+			return unless m/(?i)$_/;
 		}
 		push @fileList, $_;
 	}
@@ -153,6 +164,10 @@ The directory to search in. Defaults to ./.
 =item -s
 
 Search case sensitive
+
+=item -f
+
+Fuzzy matching: e.g., etinapa matches /etc/init.d/apache
 
 =back
 
