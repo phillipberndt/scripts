@@ -179,7 +179,11 @@ if [ -n $ARCHLIB ]; then
 	export PERL5LIB="${ARCHLIB}:$PERL5LIB"
 fi
 export PATH="$HOME/.local/bin:$PATH"
-export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
+if [ -z "$LD_LIBRARY_PATH" ]; then
+	export LD_LIBRARY_PATH="$HOME/.local/lib"
+else
+	export LD_LIBRARY_PATH="$HOME/.local/lib:$LD_LIBRARY_PATH"
+fi
 
 # Change into $HOME if $PWD is /. I often work on PCs where $HOME does not exist
 # before logging in, so $PWD becomes /.
