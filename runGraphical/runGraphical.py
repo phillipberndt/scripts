@@ -17,7 +17,8 @@
 
 	lines beginning with # are ignored.
 """
-import gtk
+from gi.repository import Gtk as gtk
+from gi.repository import Gdk as gdk
 import os
 import sys
 import re
@@ -84,10 +85,10 @@ completion.set_text_column(0)
 entry.set_completion(completion)
 
 window = gtk.Window()
-window.set_type_hint(gtk.gdk.WINDOW_TYPE_HINT_DIALOG)
+window.set_type_hint(gdk.WindowTypeHint.DIALOG)
 window.add(entry)
 window.connect("hide", lambda *x: gtk.main_quit())
-window.set_decorated(gtk.gdk.DECOR_ALL & (not gtk.gdk.DECOR_TITLE))
+window.set_decorated(gdk.WMDecoration.ALL & (not gdk.WMDecoration.TITLE))
 window.set_skip_taskbar_hint(True)
 window.set_skip_pager_hint(True)
 window.set_keep_above(True)
@@ -96,15 +97,15 @@ window.stick()
 window.show_all()
 window.move(0, 0)
 
-root = gtk.gdk.get_default_root_window()
-gtk.gdk.keyboard_grab(root, True, gtk.get_current_event_time())
-gtk.gdk.pointer_grab(root, True, 0, None, None, gtk.get_current_event_time())
+root = gdk.get_default_root_window()
+gdk.keyboard_grab(root, True, gtk.get_current_event_time())
+gdk.pointer_grab(root, True, 0, None, None, gtk.get_current_event_time())
 entry.grab_focus()
 
 gtk.main()
 command = entry.get_text()
-gtk.gdk.keyboard_ungrab()
-gtk.gdk.pointer_ungrab()
+gdk.keyboard_ungrab()
+gdk.pointer_ungrab()
 
 del window
 del entry
