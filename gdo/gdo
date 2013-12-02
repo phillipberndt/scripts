@@ -21,6 +21,11 @@ GetOptions(
 );
 pod2usage({ exitval => 1, msg => "gdo Usage:\n gdo [options] <search pattern> +<anded-search-pattern> [<substitution>]\n" }) if $wantHelp or $#ARGV < 0;
 my $search = shift @ARGV;
+if($directory eq "." && $search =~ m#/#) {
+	$search =~ m#^(.+)/([^/]+)$#;
+	$directory = $1;
+	$search = $2;
+}
 my @ands;
 while($#ARGV != -1 and $ARGV[0] =~ m/^\+/) {
 	push @ands, substr(shift @ARGV, 1);
