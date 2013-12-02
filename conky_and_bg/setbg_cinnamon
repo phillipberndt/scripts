@@ -1,0 +1,52 @@
+#!/usr/bin/env python
+#
+# Choose as many images from the ~/.bg folder as there are screens, properly
+# scale them to fit them and set them as the cinnamon background image.
+#
+#
+
+import PIL.Image
+import os
+import random
+import re
+
+imgdir = os.path.expanduser("~/.bg/")
+randr = os.popen("xrandr -q").read()
+screens = [ [ int(x) for x in y ] for y in re.findall(" connected.* ([0-9]+)x([0-9]+)\+([0-9]+)", randr) ]
+
+images = random.sample([ x for x in os.listdir(imgdir) if x.lower()[-3:] in ("jpg", "png") ], len(screens))
+
+max_height = max(( x[1] for x in screens ))
+total_width  = sum(( x[0] for x in screens ))
+
+output = PIL.Image.new("RGB", (total_width, max_height))
+
+for no in range(len(screens)):
+	screen = screens[no]
+	image = PIL.Image.open(images[no])
+	output_size = list(image.size)
+
+	if output_size[0] > screen[0] and output_size[1] > screen[1]:
+		if output_size[0] - screen[0] < output_size[1] - screen[1]:
+			output_size[1] = output_size[1] * screen[0] / output_size[0];
+			output_size[0] = screen[0]
+		else:
+			output_size[0] = output_size[0] * screen[1] / output_size[1];
+			output_size[1] = screen[1]
+
+	image = image.resize(output_size)
+	output_top = (screen[1] - output_size[1]) / 2
+	output_left = (screen[0] - output_size[0]) / 2
+
+	if output_left < 0:
+		image = image.crop([ -output_left, 0, output_size[0], output_size[1]])
+		output_left = 0
+	if output_size[0] > screen[0]:
+		image = image.crop([ 0, 0, screen[0], image.size[1]])
+
+	output.paste(image.resize(output_size), (screen[2] + output_left, output_top))
+
+filename = "/tmp/setbg_cinnamon_%d.png" % os.getuid()
+output.save(filename)
+
+os.system('dconf write "/org/cinnamon/desktop/background/picture-uri" "\'file://%s\'"' % filename)
