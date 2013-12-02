@@ -104,8 +104,8 @@ entry.grab_focus()
 
 gtk.main()
 command = entry.get_text()
-gdk.keyboard_ungrab()
-gdk.pointer_ungrab()
+gdk.keyboard_ungrab(True)
+gdk.pointer_ungrab(True)
 
 del window
 del entry
