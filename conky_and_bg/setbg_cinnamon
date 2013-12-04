@@ -6,9 +6,11 @@
 #
 
 import PIL.Image
+import PIL.ImageDraw
 import os
 import random
 import re
+import time
 
 imgdir = os.path.expanduser("~/.bg/")
 randr = os.popen("xrandr -q").read()
@@ -20,10 +22,11 @@ max_height = max(( x[1] for x in screens ))
 total_width  = sum(( x[0] for x in screens ))
 
 output = PIL.Image.new("RGB", (total_width, max_height))
+draw = PIL.ImageDraw.Draw(output)
 
 for no in range(len(screens)):
 	screen = screens[no]
-	image = PIL.Image.open(images[no])
+	image = PIL.Image.open(os.path.join(imgdir, images[no]))
 	output_size = list(image.size)
 
 	if output_size[0] > screen[0] and output_size[1] > screen[1]:
@@ -41,12 +44,14 @@ for no in range(len(screens)):
 	if output_left < 0:
 		image = image.crop([ -output_left, 0, output_size[0], output_size[1]])
 		output_left = 0
-	if output_size[0] > screen[0]:
-		image = image.crop([ 0, 0, screen[0], image.size[1]])
+	if output_size[0] + output_left > screen[0]:
+		image = image.crop([ 0, 0, screen[0] - output_left, image.size[1]])
 
+	draw.rectangle([ screen[2], 0, screen[2] + screen[0], max_height ], fill=(0, 0, 0))
 	output.paste(image.resize(output_size), (screen[2] + output_left, output_top))
 
-filename = "/tmp/setbg_cinnamon_%d.png" % os.getuid()
+os.system("rm -f /tmp/setbg_cinnamon_%d_*" % os.getuid())
+filename = "/tmp/setbg_cinnamon_%d_%d.png" % (os.getuid(), time.time())
 output.save(filename)
 
 os.system('dconf write "/org/cinnamon/desktop/background/picture-uri" "\'file://%s\'"' % filename)
