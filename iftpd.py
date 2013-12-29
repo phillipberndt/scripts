@@ -51,7 +51,7 @@ class FTPHandler(SocketServer.StreamRequestHandler):
 			_pasv_ports[self.pasv_port] = False
 	def handle(self):
 		print "Connection from %s" % self.connection.getpeername()[0]
-		self.wfile.write("200 Hello out there\r\n")
+		self.wfile.write("220 Hello out there\r\n")
 		self.pasv_port = acquirePort()
 		debug("Using port %d for passive ftp " % self.pasv_port)
 		self.path = "/"
@@ -355,7 +355,7 @@ class FTPHandler(SocketServer.StreamRequestHandler):
 				if newpath[0:len(pwd)] != pwd:
 					self.wfile.write("553 You just tried to leave root. I cant let you do that\r\n")
 					continue
-				elif not os.access(newpath, os.F_OK):
+				elif not os.path.isfile(newpath):
 					self.wfile.write("550 Not found\r\n")
 					continue
 				print "Sending " + newpath
