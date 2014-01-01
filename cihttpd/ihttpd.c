@@ -19,7 +19,13 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
 
+#define TRUE  1
+#define FALSE 0
+
+/* MAGIC MIME TYPE DETECTION ****/
 #ifdef USE_MAGIC
 #include <magic.h>
 magic_t magic_lib;
@@ -37,10 +43,10 @@ void get_mime_type(const char *file, char *type) {
 	pthread_mutex_unlock(&magic_lib_mutex);
 }
 #else
-struct mime_type_t { const char *ext, *type; } mime_types[] = {
+const struct mime_type_t { const char *ext, *type; } mime_types[] = {
 	{ ".txt", "text/plain" },
 	{ ".html", "text/html" },
-	{ ".php", "application/x+php" },
+	{ ".php", "text/x-php" },
 	{ ".css", "text/css" },
 	{ ".js", "text/js" },
 	{ ".gif", "image/gif" },
@@ -54,7 +60,7 @@ void get_mime_type(const char *file, char *type) {
 	const char *ext = strrchr(file, '.');
 
 	if(ext) {
-		struct mime_type_t *t;
+		const struct mime_type_t *t;
 		for(t = mime_types; t->ext; t++) {
 			if(strcasecmp(ext, t->ext) == 0) {
 				strcpy(type, t->type);
@@ -67,8 +73,30 @@ void get_mime_type(const char *file, char *type) {
 }
 #endif
 
-#define TRUE  1
-#define FALSE 0
+#ifdef WITH_CGI
+/** CGI HANDLER ****/
+const struct cgi_handler_t { const char *ext, *handler; } cgi_handlers[] = {
+	{ ".php", "php-cgi" },
+	{ ".pl", "perl" },
+	{ NULL, NULL }
+};
+
+const char *find_cgi_helper(const char *file) {
+	const char *ext = strrchr(file, '.');
+	if(ext) {
+		const struct cgi_handler_t *t;
+		for(t = cgi_handlers; t->ext; t++) {
+			if(strcasecmp(ext, t->ext) == 0) {
+				return t->handler;
+			}
+		}
+	}
+	return NULL;
+}
+
+#endif // WITH_CGI
+
+/** LOGGING ******/
 
 #ifndef LOG_LEVEL
 #define LOG_LEVEL 5
@@ -124,16 +152,17 @@ static int plog(int level, const char *fmt, ...) {
 #define plog(...)
 #endif
 
-struct buffered_socket_t {
-	int socket;
+/* BUFFERED SOCKET INPUT ********/
+struct buffered_fd_t {
+	int fd;
 	char *buffer;
 	size_t buffer_pos;
 	size_t buffer_size;
 };
 
-struct buffered_socket_t *buffered_socket_new(int socket) {
-	struct buffered_socket_t *ret = (struct buffered_socket_t *)malloc(sizeof(struct buffered_socket_t));
-	ret->socket = socket;
+struct buffered_fd_t *buffered_fd_new(int fd) {
+	struct buffered_fd_t *ret = (struct buffered_fd_t *)malloc(sizeof(struct buffered_fd_t));
+	ret->fd = fd;
 	ret->buffer_size = 10240;
 	ret->buffer_pos = 0;
 	ret->buffer = (char *)malloc(ret->buffer_size);
@@ -144,12 +173,12 @@ struct buffered_socket_t *buffered_socket_new(int socket) {
 	return ret;
 }
 
-void buffered_socket_destroy(struct buffered_socket_t *wrapper) {
+void buffered_fd_destroy(struct buffered_fd_t *wrapper) {
 	free(wrapper->buffer);
 	free(wrapper);
 }
 
-int buffered_socket_fill_buffer(struct buffered_socket_t *wrapper, int minimal_size) {
+int buffered_fd_fill_buffer(struct buffered_fd_t *wrapper, size_t minimal_size) {
 	if(wrapper->buffer_size < minimal_size) {
 		wrapper->buffer = realloc(wrapper->buffer, minimal_size + 10240);
 	}
@@ -157,7 +186,7 @@ int buffered_socket_fill_buffer(struct buffered_socket_t *wrapper, int minimal_s
 		return -1;
 	}
 	while(wrapper->buffer_pos < minimal_size) {
-		int ret = recv(wrapper->socket, wrapper->buffer + wrapper->buffer_pos, wrapper->buffer_size - wrapper->buffer_pos, 0);
+		int ret = read(wrapper->fd, wrapper->buffer + wrapper->buffer_pos, wrapper->buffer_size - wrapper->buffer_pos);
 		if(ret <= 0) {
 			return -1;
 		}
@@ -166,21 +195,22 @@ int buffered_socket_fill_buffer(struct buffered_socket_t *wrapper, int minimal_s
 	return wrapper->buffer_pos;
 }
 
-int buffered_socket_read(struct buffered_socket_t *wrapper, char *buffer, int count) {
-	if(buffered_socket_fill_buffer(wrapper, count) < 0) {
+int buffered_fd_read(struct buffered_fd_t *wrapper, char *buffer, size_t count) {
+	if(buffered_fd_fill_buffer(wrapper, count) < 0) {
 		return -1;
 	}
 	memcpy(buffer, wrapper->buffer, count);
-	memcpy(wrapper->buffer + count, wrapper->buffer, wrapper->buffer_pos - count);
+	memcpy(wrapper->buffer, wrapper->buffer + count, wrapper->buffer_pos - count);
 	wrapper->buffer_pos -= count;
+	return 0;
 }
 
-char *buffered_socket_read_until_delemiter(struct buffered_socket_t *wrapper, char delemiter) {
+char *buffered_fd_read_until_delemiter(struct buffered_fd_t *wrapper, char delemiter) {
 	size_t newline_pos = 0;
 	int n_th_run = 0;
 	while(newline_pos < wrapper->buffer_pos && wrapper->buffer[newline_pos] != delemiter) newline_pos++;
-	while(wrapper->buffer[newline_pos] != '\n') {
-		if(buffered_socket_fill_buffer(wrapper, wrapper->buffer_pos + 1) < 0) {
+	while(wrapper->buffer[newline_pos] != delemiter) {
+		if(buffered_fd_fill_buffer(wrapper, wrapper->buffer_pos + 1) < 0) {
 			return NULL;
 		}
 		while(newline_pos < wrapper->buffer_pos && wrapper->buffer[newline_pos] != delemiter) newline_pos++;
@@ -196,17 +226,18 @@ char *buffered_socket_read_until_delemiter(struct buffered_socket_t *wrapper, ch
 	return ret;
 }
 
-char *buffered_socket_read_until_token(struct buffered_socket_t *wrapper, const char *token) {
+char *buffered_fd_read_until_token(struct buffered_fd_t *wrapper, const char *token) {
 	int token_length = strlen(token);
 	if(wrapper->buffer_pos < wrapper->buffer_size) wrapper->buffer[wrapper->buffer_pos + 1] = 0;
 	char *found;
 	int is_crlf = token[0] == '\r' && token[1] == '\n' && token[2] == '\r' && token[3] == '\n' && !token[4];
 	while((found = strstr(wrapper->buffer, token) ) == NULL) {
-		if(buffered_socket_fill_buffer(wrapper, wrapper->buffer_pos + 1) < 0) {
+		if(buffered_fd_fill_buffer(wrapper, wrapper->buffer_pos + 1) < 0) {
 			return NULL;
 		}
 		if(wrapper->buffer_pos < wrapper->buffer_size) wrapper->buffer[wrapper->buffer_pos + 1] = 0;
 		if(is_crlf && (found = strstr(wrapper->buffer, "\n\n")) != NULL) {
+			token_length -= 2;
 			break;
 		}
 	}
@@ -236,6 +267,7 @@ void urldecode(char *dest, const char *uri) {
 	*dest = 0;
 }
 
+/* HTTP HELPERS ***/
 char *extract_header(const char *headers, const char *header) {
 	int header_length = strlen(header);
 	char *search = alloca(2 + header_length);
@@ -260,6 +292,9 @@ char *extract_header(const char *headers, const char *header) {
 	if(!header_end) {
 		header_end = header_pos + strlen(header_pos);
 	}
+	if(*(header_end - 1) != '\r') {
+		header_end++;
+	}
 
 	char *ret = (char *)malloc(header_end - header_pos);
 	memcpy(ret, header_pos, header_end - header_pos - 1);
@@ -268,7 +303,8 @@ char *extract_header(const char *headers, const char *header) {
 	return ret;
 }
 
-void client_send_error(struct buffered_socket_t *socket_wrapper, int code) {
+void client_send_error(struct buffered_fd_t *socket_wrapper, int code) {
+
 	char buf[1024];
 	const char *message;
 	switch(code) {
@@ -282,22 +318,8 @@ void client_send_error(struct buffered_socket_t *socket_wrapper, int code) {
 	}
 	int length = snprintf(buf, 1024, "HTTP/1.1 %d %s\r\nTransfer-Encoding: chunked\r\n\r\n%lx\r\n<h1>%03d %s</h1>\r\n0\r\n\r\n", code, message, 4 + 3 + 1 + strlen(message) + 5 , code, message);
 	plog(L_WARN, "Request failed with error %d %s", code, message);
-	send(socket_wrapper->socket, buf, length, 0);
+	write(socket_wrapper->fd, buf, length);
 }
-
-void client_fail_with_error(struct buffered_socket_t *socket_wrapper, int code) {
-	client_send_error(socket_wrapper, code);
-	fsync(socket_wrapper->socket);
-	close(socket_wrapper->socket);
-	buffered_socket_destroy(socket_wrapper);
-	pthread_exit(NULL);
-}
-
-struct client_thread_data_t {
-	struct sockaddr client_addr;
-	socklen_t client_addr_length;
-	int client_socket;
-};
 
 struct request_t {
 	char *raw_head_data;
@@ -307,15 +329,31 @@ struct request_t {
 	char *http_version;
 
 	char *headers;
-	char *post_data;
 };
 
-int client_read_request(struct buffered_socket_t *socket_wrapper, struct request_t *request) {
+void client_fail_with_error(struct buffered_fd_t *socket_wrapper, struct request_t *request, int code) {
+	client_send_error(socket_wrapper, code);
+	fsync(socket_wrapper->fd);
+	close(socket_wrapper->fd);
+	buffered_fd_destroy(socket_wrapper);
+	if(request && request->raw_head_data) {
+		free(request->raw_head_data);
+	}
+	pthread_exit(NULL);
+}
+
+struct client_thread_data_t {
+	struct sockaddr client_addr;
+	socklen_t client_addr_length;
+	int client_socket;
+};
+
+int client_read_request(struct buffered_fd_t *socket_wrapper, struct request_t *request) {
 	// Read the whole request
-	char *request_data = request->raw_head_data = buffered_socket_read_until_token(socket_wrapper, "\r\n\r\n");
+	char *request_data = request->raw_head_data = buffered_fd_read_until_token(socket_wrapper, "\r\n\r\n");
 	if(!request_data) {
-		close(socket_wrapper->socket);
-		buffered_socket_destroy(socket_wrapper);
+		close(socket_wrapper->fd);
+		buffered_fd_destroy(socket_wrapper);
 		pthread_exit(NULL);
 	}
 
@@ -325,7 +363,7 @@ int client_read_request(struct buffered_socket_t *socket_wrapper, struct request
 	if(!request_work) {
 		plog(L_WARN, "Invalid request: Expected space after method");
 		free(request_data);
-		client_fail_with_error(socket_wrapper, 400);
+		client_fail_with_error(socket_wrapper, request, 400);
 	}
 	*request_work = 0;
 	request->method = request_data;
@@ -339,7 +377,7 @@ int client_read_request(struct buffered_socket_t *socket_wrapper, struct request
 	if(!request_work_after) {
 		plog(L_WARN, "Invalid request: Expected space after URI");
 		free(request_data);
-		client_fail_with_error(socket_wrapper, 413);
+		client_fail_with_error(socket_wrapper, request, 413);
 	}
 	*request_work_after = 0;
 	request->uri = request_work;
@@ -353,7 +391,7 @@ int client_read_request(struct buffered_socket_t *socket_wrapper, struct request
 	if(!request_work_after) {
 		plog(L_WARN, "Invalid request: Expected new line after HTTP version");
 		free(request_data);
-		client_fail_with_error(socket_wrapper, 400);
+		client_fail_with_error(socket_wrapper, request, 400);
 	}
 	*request_work_after = 0;
 	if(*(request_work_after - 1) == '\r') {
@@ -388,28 +426,134 @@ int client_read_request(struct buffered_socket_t *socket_wrapper, struct request
 	return TRUE;
 }
 
+int client_read_post_data(struct buffered_fd_t *socket_wrapper, struct request_t *request, int fd_target, int forward_chunk_headers_to_target) {
+	if(strcmp(request->method, "POST") != 0) {
+		return -1;
+	}
+
+	// Read POST data
+	char *length_header = extract_header(request->headers, "content-length");
+	if(length_header) {
+		size_t content_length = atol(length_header);
+
+		char buffer[10240];
+		while(content_length > 0) {
+			size_t size = content_length > 10240 ? 10240 : content_length;
+			if(buffered_fd_read(socket_wrapper, buffer, size) < 0) {
+				client_fail_with_error(socket_wrapper, request, 400);
+			}
+			if(fd_target > 0) {
+				write(fd_target, buffer, size);
+			}
+			content_length -= size;
+		}
+	}
+	else {
+		char *transfer_encoding = extract_header(request->headers, "transfer-encoding");
+		if(!transfer_encoding) {
+			client_fail_with_error(socket_wrapper, request, 400);
+		}
+		if(strcmp(transfer_encoding, "chunked") != 0) {
+			free(transfer_encoding);
+			client_fail_with_error(socket_wrapper, request, 400);
+		}
+		free(transfer_encoding);
+
+		char *post_data_buffer;
+		size_t chunk_size;
+		while(TRUE) {
+			char *line = buffered_fd_read_until_delemiter(socket_wrapper, '\n');
+			if(!line || sscanf(line, "%lx", &chunk_size) == 0) {
+				if(line) free(line);
+				plog(L_WARN, "Failed to read chunked POST data length");
+				client_fail_with_error(socket_wrapper, request, 400);
+			}
+			if(fd_target > 0 && forward_chunk_headers_to_target) {
+				write(fd_target, line, strlen(line));
+			}
+			free(line);
+			if(chunk_size == 0) {
+				line = buffered_fd_read_until_delemiter(socket_wrapper, '\n');
+				if(line) {
+					// We do not accept headers after the body. This is a violation of the HTTP
+					// standard
+					// TODO I should implement this someday
+					if(line[0] != '\n' && (line[0] != '\r' || line[1] != '\n')) {
+						plog(L_ERROR, "Client attempted to send headers after chunked body. This is unsupported.");
+						client_fail_with_error(socket_wrapper, request, 400);
+					}
+					if(fd_target > 0 && forward_chunk_headers_to_target) {
+						write(fd_target, line, strlen(line));
+					}
+					free(line);
+					break;
+				}
+			}
+			post_data_buffer = (char *)malloc(chunk_size);
+			if(!post_data_buffer) {
+				plog(L_ERROR, "Failed to allocate memory for post data");
+				client_fail_with_error(socket_wrapper, request, 500);
+			}
+			if(buffered_fd_read(socket_wrapper, post_data_buffer, chunk_size) < 0) {
+				free(post_data_buffer);
+				client_fail_with_error(socket_wrapper, request, 500);
+			}
+			if(fd_target > 0) {
+				write(fd_target, post_data_buffer, chunk_size);
+			}
+			free(post_data_buffer);
+			line = buffered_fd_read_until_delemiter(socket_wrapper, '\n');
+			if(line) {
+				if(line[0] != '\n' && (line[0] != '\r' || line[1] != '\n')) {
+					free(request->raw_head_data);
+					client_fail_with_error(socket_wrapper, request, 400);
+				}
+				if(fd_target > 0 && forward_chunk_headers_to_target) {
+					write(fd_target, line, strlen(line));
+				}
+				free(line);
+			}
+		}
+	}
+}
+
+void client_flush_post_data(struct buffered_fd_t *socket_wrapper, struct request_t *request) {
+	client_read_post_data(socket_wrapper, request, 0, 0);
+}
+
+void env_var_assign(char **pointer_location, const char *name, const char *value) {
+	if(!value) value = "";
+	int nlen = strlen(name);
+	int vlen = strlen(value);
+	*pointer_location = (char *)malloc(nlen + vlen + 2);
+	memcpy(*pointer_location, name, nlen);
+	(*pointer_location)[nlen] = '=';
+	memcpy(*pointer_location + nlen + 1, value, vlen);
+	(*pointer_location)[nlen + vlen + 1] = 0;
+}
 void *client_thread(struct client_thread_data_t *client_info_ptr) {
 	struct client_thread_data_t client_info = *client_info_ptr;
 	free(client_info_ptr);
 	int socket = client_info.client_socket;
-	struct buffered_socket_t *socket_wrapper = buffered_socket_new(socket);
-
-	// TODO Maybe implement FTP in here, too?
+	struct buffered_fd_t *socket_wrapper = buffered_fd_new(socket);
 
 	char client_hostname[NI_MAXHOST];
+	char client_ip[64];
+	inet_ntop(client_info.client_addr.sa_family, &((struct sockaddr_in *)&client_info.client_addr)->sin_addr, client_ip, 64);
 	int errcode;
 	if((errcode = getnameinfo(&client_info.client_addr, client_info.client_addr_length, client_hostname, NI_MAXHOST, NULL, 0, 0)) != 0) {
-		plog(L_WARN, "Incoming connection with an unresolvable remote side: %s [%d]", gai_strerror(errcode), errcode);
+		plog(L_WARN, "Incoming connection with an unresolvable remote side from %s: %s [%d]", client_ip, gai_strerror(errcode), errcode);
 	}
 	else {
-		plog(L_DEBUG, "Incoming connection from %s", client_hostname);
+		plog(L_DEBUG, "Incoming connection from %s [%s]", client_ip, client_hostname);
 	}
 
 	while(TRUE) {
 		// Read a single request
 		struct request_t request;
+		request.raw_head_data = NULL;
 		if(!client_read_request(socket_wrapper, &request)) {
-			client_fail_with_error(socket_wrapper, 400);
+			client_fail_with_error(socket_wrapper, &request, 400);
 		}
 
 		int is_keep_alive = 1;
@@ -423,7 +567,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 
 		// Extract possible file name
 		if(strstr(request.uri, "/../") != NULL) {
-			client_fail_with_error(socket_wrapper, 400);
+			client_fail_with_error(socket_wrapper, &request, 400);
 		}
 		struct stat file_info;
 		memset(&file_info, 0, sizeof(struct stat));
@@ -455,6 +599,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 			client_send_error(socket_wrapper, 404);
 		}
 		else if(S_ISDIR(file_info.st_mode)) {
+			client_flush_post_data(socket_wrapper, &request);
 			if(full_file[strlen(full_file) - 1] != '/') {
 				// Redirect to file with slash in the end
 				char *header = alloca(100 + strlen(request.uri));
@@ -490,99 +635,303 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 			}
 		}
 		else if(!file_info.st_mode & S_IROTH) {
+			client_flush_post_data(socket_wrapper, &request);
 			client_send_error(socket_wrapper, 404);
 		}
 		else if(S_ISREG(file_info.st_mode)) {
+			char type[255];
+			get_mime_type(full_file, type);
+
+#ifdef WITH_CGI
 			if(file_info.st_mode & S_IXOTH) {
-				// TODO Invoke CGI
-				// TODO Handle PHP (is not CGI usually :/)
-			}
+				const char *cgi_helper = find_cgi_helper(full_file);
+				if(!cgi_helper) cgi_helper = full_file;
 
-			int file = open(full_file, O_RDONLY);
-			char header[1024];
+				plog(L_DEBUG, "Using CGI helper %s to serve %s", cgi_helper, full_file);
 
-			size_t file_length = file_info.st_size;
-			size_t file_start = 0;
-
-			char *range_header = extract_header(request.headers, "range");
-			if(range_header) {
-				char *equal_pos = strchr(range_header, '=');
-				if(!equal_pos) {
-					plog(L_DEBUG, "Range header: Equal sign not found");
-					free(range_header);
-					client_fail_with_error(socket_wrapper, 400);
+				int child_writer[2];
+				int child_reader[2];
+				if(pipe(child_writer) < 0) {
+					client_fail_with_error(socket_wrapper, &request, 500);
 				}
-				char *until_pos = strchr(equal_pos, '-');
-				if(!until_pos) {
-					plog(L_DEBUG, "Range header: Minus sign not found");
-					free(range_header);
-					client_fail_with_error(socket_wrapper, 400);
-				}
-				*equal_pos = 0;
-				*until_pos = 0;
-
-				if(strcmp(range_header, "bytes") != 0) {
-					plog(L_DEBUG, "Range header: First word is %s, not bytes", range_header);
-					free(range_header);
-					client_fail_with_error(socket_wrapper, 416);
+				if(pipe(child_reader) < 0) {
+					close(child_writer[0]);
+					close(child_writer[1]);
+					client_fail_with_error(socket_wrapper, &request, 500);
 				}
 
-				size_t bytes_from = atol(equal_pos + 1);
-				size_t bytes_to = atol(until_pos + 1);
+				pid_t child = fork();
+				if(child == 0) {
+					close(0);
+					dup2(child_writer[0], 0);
+					close(1);
+					dup2(child_reader[1], 1);
 
-				free(range_header);
+					char *child_envp[11];
+					child_envp[0] = "GATEWAY_INTERFACE=CGI/1.1";
+					env_var_assign(&child_envp[1], "SERVER_PROTOCOL", request.http_version);
+					env_var_assign(&child_envp[2], "REQUEST_METHOD", request.method);
+					env_var_assign(&child_envp[3], "PATH_TRANSLATED", full_file);
+					env_var_assign(&child_envp[4], "SCRIPT_NAME", full_file + 1);
+					env_var_assign(&child_envp[5], "QUERY_STRING", query_part);
+					env_var_assign(&child_envp[6], "REMOTE_HOST", client_hostname);
+					env_var_assign(&child_envp[7], "REMOTE_ADDR", client_ip);
+					const char *path = getenv("PATH");
+					if(path) {
+						env_var_assign(&child_envp[8], "PATH", path);
+					}
+					else {
+						env_var_assign(&child_envp[8], "PATH", "/bin:/usr/bin:/usr/local/bin");
+					}
+					int header_count = 8;
 
-				if(bytes_to == 0) {
-					bytes_to = file_info.st_size - 1;
+					char *content_type = extract_header(request.headers, "content-type");
+					if(content_type) {
+						env_var_assign(&child_envp[++header_count], "CONTENT_TYPE", content_type);
+						free(content_type);
+					}
+					char *content_length = extract_header(request.headers, "content-length");
+					if(content_length) {
+						env_var_assign(&child_envp[++header_count], "CONTENT_LENGTH", content_length);
+						free(content_length);
+					}
+					if(path_info) {
+						env_var_assign(&child_envp[++header_count], "PATH_INFO", path_info);
+					}
+					child_envp[++header_count] = NULL;
+
+					const char *const child_argv[] = {
+						cgi_helper,
+						full_file,
+						NULL
+					};
+
+					execvpe(cgi_helper, (char * const *)child_argv, (char * const *)child_envp);
+					plog(L_ERROR, "Failed to execute CGI child process");
+					exit(1);
 				}
 
-				file_length = bytes_to - bytes_from;
-				file_start = bytes_from;
+				close(child_writer[0]);
+				close(child_reader[1]);
 
-				char type[255];
-				get_mime_type(full_file, type);
-				int length = snprintf(header, 1024, "HTTP/1.1 206 Partial Content\r\nConnection: %s\r\nContent-Type: %s\r\nContent-Length: %lu\r\nContent-Range: bytes %lu-%lu/%lu\r\nAccept-Ranges: bytes\r\n\r\n",
-					connection_type,
-					type,
-					file_length,
-					bytes_from,
-					bytes_to,
-					file_info.st_size);
+				// Write POST data to child
+				client_read_post_data(socket_wrapper, &request, child_writer[1], 1);
+				fsync(child_writer[1]);
+				close(child_writer[1]);
 
-				plog(L_DEBUG, "Is a regular file. Sending the file: size=%lu, type=%s with range %lu-%lu", file_info.st_size, type, bytes_from, bytes_to);
-				if(length < 0 || length > 1024) {
-					client_fail_with_error(socket_wrapper, 500);
+				// Read headers from child reader into socket
+				struct buffered_fd_t *child_wrapper = buffered_fd_new(child_reader[0]);
+				char *headers = buffered_fd_read_until_token(child_wrapper, "\r\n\r\n");
+				if(!headers) {
+					client_fail_with_error(socket_wrapper, &request, 500);
 				}
-				send(socket, header, length, 0);
+
+				// Cork socket
+				int cork = 1;
+				setsockopt(socket, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
+
+				char *status_header = extract_header(headers, "status");
+				if(status_header) {
+					char out[128];
+					int len = snprintf(out, 128, "HTTP/1.1 %s\r\n", status_header);
+					write(socket, out, len);
+					free(status_header);
+				}
+				else {
+					const char header[] = "HTTP/1.1 200 Ok\r\n";
+					write(socket, header, sizeof(header) - 1);
+				}
+
+				char *header;
+				for(header = headers; *header != '\n' && (header[0] != '\r' || header[1] != '\n'); ) {
+					char *next = strchr(header, '\n');
+					if(*(next - 1) == '\r') {
+						char after1 = next[1];
+						next[1] = 0;
+						write(socket, header, strlen(header));
+						next[1] = after1;
+					}
+					else {
+						char after1 = next[1];
+						char after2 = next[2];
+						next[0] = '\r';
+						next[1] = '\n';
+						next[2] = 0;
+						write(socket, header, strlen(header));
+						next[1] = after1;
+						next[2] = after2;
+					}
+					header = next + 1;
+				}
+
+				int is_chunked = 0;
+				char *connection = extract_header(headers, "connection");
+				if(connection) {
+					if(strcasecmp(connection, "close") == 0) {
+						is_keep_alive = 0;
+					}
+					free(connection);
+				}
+				else {
+					const char keep_alive[] = "Connection: Keep-Alive\r\n";
+					write(socket, keep_alive, sizeof(keep_alive) - 1);
+				}
+				char *transfer_encoding = extract_header(headers, "transfer-encoding");
+				if(transfer_encoding) {
+					free(transfer_encoding);
+				}
+				else {
+					is_chunked = 1;
+					const char chunked[] = "Transfer-Encoding: chunked\r\n";
+					write(socket, chunked, sizeof(chunked) - 1);
+				}
+				write(socket, "\r\n", 2);
+				char *length_header = extract_header(headers, "content-length");
+				ssize_t cgi_content_length = -1;
+				if(length_header) {
+					cgi_content_length = atol(length_header);
+					free(length_header);
+				}
+
+				// Uncork socket
+				cork = 0;
+				setsockopt(socket, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
+
+				// Read from child reader into socket
+				if(child_wrapper->buffer_pos) {
+					if(is_chunked) {
+						char chunk_header[128];
+						int len = snprintf(chunk_header, 128, "%lx\r\n", child_wrapper->buffer_pos);
+						write(socket, chunk_header, len);
+					}
+					write(socket, child_wrapper->buffer, child_wrapper->buffer_pos);
+					if(cgi_content_length > 0) cgi_content_length -= child_wrapper->buffer_pos;
+					if(is_chunked) {
+						write(socket, "\r\n", 2);
+					}
+				}
+				buffered_fd_destroy(child_wrapper);
+				while(TRUE) {
+					char buffer[10240];
+					ssize_t bytes_read = read(child_reader[0], buffer, 10240);
+					if(is_chunked) {
+						char chunk_header[128];
+						int len = snprintf(chunk_header, 128, "%lx\r\n", bytes_read);
+						write(socket, chunk_header, len);
+					}
+					if(bytes_read && write(socket, buffer, bytes_read) <= 0) {
+						break;
+					}
+					if(is_chunked) {
+						write(socket, "\r\n", 2);
+					}
+					if(cgi_content_length > 0) cgi_content_length -= bytes_read;
+					if(bytes_read == 0) {
+						break;
+					}
+
+					bytes_read = read(child_reader[0], buffer, 10240);
+				}
+
+				close(child_reader[0]);
+				int status;
+				waitpid(child, NULL, &status, 0);
+
+				if(cgi_content_length > 0) {
+					// There were bytes left to send. Abort connection.
+					plog(L_WARN, "CGI aborted with %ld bytes remaining.", cgi_content_length);
+					free(request.raw_head_data);
+					break;
+				}
 			}
 			else {
-				char type[255];
-				get_mime_type(full_file, type);
-				int length = snprintf(header, 1024, "HTTP/1.1 200 Ok\r\nConnection: %s\r\nContent-Type: %s\r\nContent-Length: %lu\r\n\r\n",
-					connection_type,
-					type,
-					file_info.st_size);
+#endif
+				client_flush_post_data(socket_wrapper, &request);
 
-				plog(L_DEBUG, "Is a regular file. Sending the file: size=%lu, type=%s", file_info.st_size, type);
-				if(length < 0 || length > 1024) {
-					client_fail_with_error(socket_wrapper, 500);
+				int file = open(full_file, O_RDONLY);
+				char header[1024];
+
+				size_t file_length = file_info.st_size;
+				size_t file_start = 0;
+
+				char *range_header = extract_header(request.headers, "range");
+				if(range_header) {
+					char *equal_pos = strchr(range_header, '=');
+					if(!equal_pos) {
+						plog(L_DEBUG, "Range header: Equal sign not found");
+						free(range_header);
+						client_fail_with_error(socket_wrapper, &request, 400);
+					}
+					char *until_pos = strchr(equal_pos, '-');
+					if(!until_pos) {
+						plog(L_DEBUG, "Range header: Minus sign not found");
+						free(range_header);
+						client_fail_with_error(socket_wrapper, &request, 400);
+					}
+					*equal_pos = 0;
+					*until_pos = 0;
+
+					if(strcmp(range_header, "bytes") != 0) {
+						plog(L_DEBUG, "Range header: First word is %s, not bytes", range_header);
+						free(range_header);
+						client_fail_with_error(socket_wrapper, &request, 416);
+					}
+
+					size_t bytes_from = atol(equal_pos + 1);
+					size_t bytes_to = atol(until_pos + 1);
+
+					free(range_header);
+
+					if(bytes_to == 0) {
+						bytes_to = file_info.st_size - 1;
+					}
+
+					file_length = bytes_to - bytes_from;
+					file_start = bytes_from;
+					int length = snprintf(header, 1024, "HTTP/1.1 206 Partial Content\r\nConnection: %s\r\nContent-Type: %s\r\nContent-Length: %lu\r\nContent-Range: bytes %lu-%lu/%lu\r\nAccept-Ranges: bytes\r\n\r\n",
+						connection_type,
+						type,
+						file_length,
+						bytes_from,
+						bytes_to,
+						file_info.st_size);
+
+					plog(L_DEBUG, "Is a regular file. Sending the file: size=%lu, type=%s with range %lu-%lu", file_info.st_size, type, bytes_from, bytes_to);
+					if(length < 0 || length > 1024) {
+						client_fail_with_error(socket_wrapper, &request, 500);
+					}
+					send(socket, header, length, 0);
 				}
-				send(socket, header, length, 0);
-			}
+				else {
+					int length = snprintf(header, 1024, "HTTP/1.1 200 Ok\r\nConnection: %s\r\nContent-Type: %s\r\nContent-Length: %lu\r\n\r\n",
+						connection_type,
+						type,
+						file_info.st_size);
 
-			if(strcmp(request.method, "HEAD") != 0) {
-				sendfile(socket, file, &file_start, file_length);
-			}
+					plog(L_DEBUG, "Is a regular file. Sending the file: size=%lu, type=%s", file_info.st_size, type);
+					if(length < 0 || length > 1024) {
+						client_fail_with_error(socket_wrapper, &request, 500);
+					}
+					send(socket, header, length, 0);
+				}
 
-			close(file);
+				if(strcmp(request.method, "HEAD") != 0) {
+					sendfile(socket, file, &file_start, file_length);
+				}
+
+				close(file);
+#ifdef WITH_CGI
+			}
+#endif
 		}
 		else {
+			client_flush_post_data(socket_wrapper, &request);
 			client_send_error(socket_wrapper, 403);
 		}
 
-		free(request.raw_head_data);
-		if(request.post_data) {
-			free(request.post_data);
+		if(request.raw_head_data) {
+			free(request.raw_head_data);
+			request.raw_head_data = NULL;
 		}
 
 		if(!is_keep_alive) {
@@ -590,14 +939,13 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 		}
 	}
 
-	//  TODO CGI
-
 	fsync(socket);
 	close(socket);
-	buffered_socket_destroy(socket_wrapper);
+	buffered_fd_destroy(socket_wrapper);
 }
 
 int create_server(unsigned int port) {
+	// TODO Listen on v6 also
 	int server_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if(!server_socket) {
 		plog(L_FATAL, "Failed to create socket");
@@ -622,6 +970,13 @@ int create_server(unsigned int port) {
 
 int main(int argc, char *argv[]) {
 	unsigned int port = 1234;
+
+	if(argc > 1) {
+		port = atoi(argv[1]);
+		if(port == 0) {
+			plog(L_FATAL, "The port argument must be a positive integer");
+		}
+	}
 
 	int server_socket = create_server(port);
 	if(!server_socket) {

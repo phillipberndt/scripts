@@ -34,12 +34,13 @@ Currently, this project consists of:
 
 * cihttpd - A C implementation of the instant httpd
 
+  YOU SHOULD NOT USE THIS. THIS IS MORE OF A FUN PROJECT THAN ANYTHING OF
+  ACTUAL USE. There are lots of tiny C httpds around, which could easily be
+  hacked to serve from the current directory. See for example my scripts
+  repository for a wrapper around lighttpd.
+
   Features:
    * Keep-Alive
    * Range'd requests
    * Thread-based
 
-  This is still in development and is more of a fun project than anything of
-  actual use. There are lots of tiny C httpds around, which could easily be
-  hacked to serve from the current directory. See for example my scripts
-  repository for a wrapper around lighttpd.
