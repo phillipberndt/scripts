@@ -26,23 +26,6 @@
 #define FALSE 0
 
 /* MAGIC MIME TYPE DETECTION ****/
-#ifdef USE_MAGIC
-#include <magic.h>
-magic_t magic_lib;
-pthread_mutex_t magic_lib_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-void get_mime_type(const char *file, char *type) {
-	pthread_mutex_lock(&magic_lib_mutex);
-	const char *magic_type = magic_file(magic_lib, file);
-	if(magic_type) {
-		strncpy(type, magic_type, 255);
-	}
-	else {
-		strcpy(type, "application/octet-stream");
-	}
-	pthread_mutex_unlock(&magic_lib_mutex);
-}
-#else
 const struct mime_type_t { const char *ext, *type; } mime_types[] = {
 	{ ".txt", "text/plain" },
 	{ ".html", "text/html" },
@@ -55,6 +38,13 @@ const struct mime_type_t { const char *ext, *type; } mime_types[] = {
 	{ ".jpeg", "image/jpg" },
 	{ NULL, NULL }
 };
+
+#ifdef USE_MAGIC
+#include <magic.h>
+
+magic_t magic_lib;
+pthread_mutex_t magic_lib_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 
 void get_mime_type(const char *file, char *type) {
 	const char *ext = strrchr(file, '.');
@@ -69,9 +59,17 @@ void get_mime_type(const char *file, char *type) {
 		}
 	}
 
+#ifdef USE_MAGIC
+	pthread_mutex_lock(&magic_lib_mutex);
+	const char *magic_type = magic_file(magic_lib, file);
+	if(magic_type) {
+		strncpy(type, magic_type, 255);
+	}
+	pthread_mutex_unlock(&magic_lib_mutex);
+#endif
+
 	strcpy(type, "application/octet-stream");
 }
-#endif
 
 #ifdef WITH_CGI
 /** CGI HANDLER ****/
@@ -152,6 +150,102 @@ static int plog(int level, const char *fmt, ...) {
 #define plog(...)
 #endif
 
+/* URL REWRITING *****/
+#ifdef WITH_REWRITE
+#include <regex.h>
+
+char *htaccess_rewrite_url(const char *unescaped_url_ptr) {
+	char *retval = NULL;
+	char path[PATH_MAX];
+
+	char rewritten[PATH_MAX];
+	strcpy(rewritten, unescaped_url_ptr);
+
+	char *unescaped_url = alloca(strlen(unescaped_url_ptr) + 1);
+	strcpy(unescaped_url,  unescaped_url_ptr);
+
+	int did_rewrite = 0;
+
+	char *slash_pos;
+	for(slash_pos = strrchr(unescaped_url, '/'); slash_pos; (slash_pos = strrchr(unescaped_url, '/')) && slash_pos > path) {
+		*slash_pos = 0;
+		snprintf(path, PATH_MAX, ".%s/.htaccess", unescaped_url);
+		if(access(path, R_OK) == 0) {
+			plog(L_DEBUG, "htaccess file found at %s", path);
+			FILE *htaccess_file = fopen(path, "r");
+
+			char line[2048];
+			char *line_worker;
+			while(line_worker = fgets(line, 2048, htaccess_file)) {
+				while(*line_worker == ' ' || *line_worker == '\t') line_worker++;
+				if(strncasecmp(line_worker, "rewriterule", 11) != 0) continue;
+				while(*line_worker != ' ' && *line_worker != '\t' && *line_worker != 0) line_worker++;
+				if(!*line_worker) continue;
+				while(*line_worker == ' ' || *line_worker == '\t') line_worker++;
+				char *regex_string = line_worker;
+				while(*line_worker != ' ' && *line_worker != '\t' && *line_worker != 0) line_worker++;
+				if(!*line_worker) continue;
+				*line_worker = 0;
+				line_worker++;
+				char *space_seeker = line_worker;
+				while(*space_seeker != ' ' && *space_seeker != '\t' && *space_seeker != 0) space_seeker++;
+				if(*space_seeker) *space_seeker = 0;
+
+				regex_t regex;
+				int regex_error;
+				plog(L_DEBUG, "Match %s against %s", unescaped_url_ptr, regex_string);
+				if(regex_error = regcomp(&regex, regex_string, REG_ICASE | REG_EXTENDED)) {
+					char err_str[255];
+					regerror(regex_error, &regex, err_str, 255);
+					plog(L_WARN, "Failed to compile regex `%s' in %s: %s", regex_string, path, err_str);
+					continue;
+				}
+				regmatch_t matches[10];
+				int status = regexec(&regex, rewritten, 10, matches, 0);
+				regfree(&regex);
+				if(status != 0) continue;
+
+				char new_str[PATH_MAX];
+				int new_str_length = 0;
+				if(new_str_length + matches[0].rm_so >= PATH_MAX) return NULL;
+				memcpy(new_str, rewritten, matches[0].rm_so);
+				new_str_length += matches[0].rm_so;
+				for(; *line_worker && *line_worker != '\r' && *line_worker != '\n'; line_worker++) {
+					if(*line_worker == '\\' || *line_worker == '$') {
+						int match = line_worker[1] - '0';
+						line_worker++;
+
+						int len = matches[match].rm_eo - matches[match].rm_so;
+						if(new_str_length + len >= PATH_MAX) return NULL;
+						memcpy(new_str + new_str_length, rewritten + matches[match].rm_so, len);
+						new_str_length += len;
+					}
+					else {
+						if(new_str_length + 1 >= PATH_MAX) return NULL;
+						new_str[new_str_length++] = *line_worker;
+					}
+				}
+				if(new_str_length + strlen(rewritten) - matches[0].rm_eo >= PATH_MAX) return NULL;
+				strcpy(new_str + new_str_length, rewritten + matches[0].rm_eo);
+
+				plog(L_DEBUG, "Rewrite: `%s' → `%s'", unescaped_url_ptr, new_str);
+				strcpy(rewritten, new_str);
+				did_rewrite = 1;
+			}
+
+			fclose(htaccess_file);
+		}
+	}
+
+	if(did_rewrite) {
+		char *ret = malloc(strlen(rewritten) + 1);
+		strcpy(ret, rewritten);
+		return ret;
+	}
+	return NULL;
+}
+#endif
+
 /* BUFFERED SOCKET INPUT ********/
 struct buffered_fd_t {
 	int fd;
@@ -170,6 +264,7 @@ struct buffered_fd_t *buffered_fd_new(int fd) {
 		free(ret);
 		return NULL;
 	}
+	ret->buffer[0] = 0;
 	return ret;
 }
 
@@ -228,17 +323,24 @@ char *buffered_fd_read_until_delemiter(struct buffered_fd_t *wrapper, char delem
 
 char *buffered_fd_read_until_token(struct buffered_fd_t *wrapper, const char *token) {
 	int token_length = strlen(token);
-	if(wrapper->buffer_pos < wrapper->buffer_size) wrapper->buffer[wrapper->buffer_pos + 1] = 0;
+	if(wrapper->buffer_pos < wrapper->buffer_size) wrapper->buffer[wrapper->buffer_pos] = 0;
 	char *found;
 	int is_crlf = token[0] == '\r' && token[1] == '\n' && token[2] == '\r' && token[3] == '\n' && !token[4];
-	while((found = strstr(wrapper->buffer, token) ) == NULL) {
-		if(buffered_fd_fill_buffer(wrapper, wrapper->buffer_pos + 1) < 0) {
-			return NULL;
-		}
-		if(wrapper->buffer_pos < wrapper->buffer_size) wrapper->buffer[wrapper->buffer_pos + 1] = 0;
+	while((found = strstr(wrapper->buffer, token)) == NULL) {
 		if(is_crlf && (found = strstr(wrapper->buffer, "\n\n")) != NULL) {
 			token_length -= 2;
 			break;
+		}
+		if(buffered_fd_fill_buffer(wrapper, wrapper->buffer_pos + 1) < 0) {
+			return NULL;
+		}
+		if(wrapper->buffer_pos < wrapper->buffer_size) wrapper->buffer[wrapper->buffer_pos] = 0;
+	}
+	if(is_crlf && *found == '\r') {
+		char *alternative = strstr(wrapper->buffer, "\n\n");
+		if(alternative && alternative < found) {
+			found = alternative;
+			token_length -= 2;
 		}
 	}
 	char *ret = (char *)malloc(found - wrapper->buffer + token_length + 1);
@@ -298,7 +400,7 @@ char *extract_header(const char *headers, const char *header) {
 
 	char *ret = (char *)malloc(header_end - header_pos);
 	memcpy(ret, header_pos, header_end - header_pos - 1);
-	ret[header_end - header_pos] = 0;
+	ret[header_end - header_pos - 1] = 0;
 
 	return ret;
 }
@@ -563,8 +665,6 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 			is_keep_alive = 0;
 		}
 
-		// TODO URL rewriting
-
 		// Extract possible file name
 		if(strstr(request.uri, "/../") != NULL) {
 			client_fail_with_error(socket_wrapper, &request, 400);
@@ -574,7 +674,38 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 		char *full_file = alloca(strlen(request.uri) + 2);
 		full_file[0] = '.';
 		urldecode(full_file + 1, request.uri);
+		char *hash_part = strchr(full_file, '#');
+		if(hash_part) {
+			*hash_part = 0;
+		}
 		char *query_part = strchr(full_file, '?');
+#ifdef WITH_REWRITE
+		int file_exists = 0;
+		if(query_part) {
+			*query_part = 0;
+			file_exists = access(full_file, F_OK);
+			*query_part = '?';
+		}
+		else {
+			file_exists = access(full_file, F_OK);
+		}
+		if(file_exists != 0) {
+			char *target_file = htaccess_rewrite_url(full_file + 1);
+			if(target_file) {
+				// htaccess rewriting was successful
+				full_file = alloca(strlen(target_file) + 3);
+				full_file[0] = '.';
+				int index = 1;
+				if(full_file[0] != '/') {
+					index = 2;
+					full_file[1] = '/';
+				}
+				strcpy(full_file + index, target_file);
+				free(target_file);
+				query_part = strchr(full_file, '?');
+			}
+		}
+#endif
 		char *path_info = NULL;
 		if(query_part != NULL) {
 			*query_part = 0;
@@ -643,8 +774,8 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 			get_mime_type(full_file, type);
 
 #ifdef WITH_CGI
-			if(file_info.st_mode & S_IXOTH) {
-				const char *cgi_helper = find_cgi_helper(full_file);
+			const char *cgi_helper = find_cgi_helper(full_file);
+			if(cgi_helper || file_info.st_mode & S_IXOTH) {
 				if(!cgi_helper) cgi_helper = full_file;
 
 				plog(L_DEBUG, "Using CGI helper %s to serve %s", cgi_helper, full_file);
@@ -715,6 +846,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 				close(child_reader[1]);
 
 				// Write POST data to child
+				// TODO Problems with long post data
 				client_read_post_data(socket_wrapper, &request, child_writer[1], 1);
 				fsync(child_writer[1]);
 				close(child_writer[1]);
@@ -785,17 +917,13 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 					const char chunked[] = "Transfer-Encoding: chunked\r\n";
 					write(socket, chunked, sizeof(chunked) - 1);
 				}
-				write(socket, "\r\n", 2);
 				char *length_header = extract_header(headers, "content-length");
 				ssize_t cgi_content_length = -1;
 				if(length_header) {
 					cgi_content_length = atol(length_header);
 					free(length_header);
 				}
-
-				// Uncork socket
-				cork = 0;
-				setsockopt(socket, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
+				write(socket, "\r\n", 2);
 
 				// Read from child reader into socket
 				if(child_wrapper->buffer_pos) {
@@ -804,6 +932,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 						int len = snprintf(chunk_header, 128, "%lx\r\n", child_wrapper->buffer_pos);
 						write(socket, chunk_header, len);
 					}
+
 					write(socket, child_wrapper->buffer, child_wrapper->buffer_pos);
 					if(cgi_content_length > 0) cgi_content_length -= child_wrapper->buffer_pos;
 					if(is_chunked) {
@@ -811,10 +940,16 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 					}
 				}
 				buffered_fd_destroy(child_wrapper);
+
+				// Uncork socket
+				cork = 0;
+				setsockopt(socket, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
+
 				while(TRUE) {
-					char buffer[10240];
+					char buffer[10241];
 					ssize_t bytes_read = read(child_reader[0], buffer, 10240);
 					if(is_chunked) {
+						cork = 1; setsockopt(socket, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
 						char chunk_header[128];
 						int len = snprintf(chunk_header, 128, "%lx\r\n", bytes_read);
 						write(socket, chunk_header, len);
@@ -824,13 +959,12 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 					}
 					if(is_chunked) {
 						write(socket, "\r\n", 2);
+						cork = 0; setsockopt(socket, IPPROTO_TCP, TCP_CORK, &cork, sizeof(cork));
 					}
 					if(cgi_content_length > 0) cgi_content_length -= bytes_read;
 					if(bytes_read == 0) {
 						break;
 					}
-
-					bytes_read = read(child_reader[0], buffer, 10240);
 				}
 
 				close(child_reader[0]);

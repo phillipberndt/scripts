@@ -42,5 +42,6 @@ Currently, this project consists of:
   Features:
    * Keep-Alive
    * Range'd requests
+   * mod_rewrite (does not support RewriteCond, as above)
    * Thread-based
 
