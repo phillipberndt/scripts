@@ -25,6 +25,13 @@
 #define TRUE  1
 #define FALSE 0
 
+const char *directory_index_extensions[] = {
+	".html",
+	".php",
+	".pl",
+	NULL
+};
+
 /* MAGIC MIME TYPE DETECTION ****/
 const struct mime_type_t { const char *ext, *type; } mime_types[] = {
 	{ ".txt", "text/plain" },
@@ -295,7 +302,7 @@ int buffered_fd_read(struct buffered_fd_t *wrapper, char *buffer, size_t count) 
 		return -1;
 	}
 	memcpy(buffer, wrapper->buffer, count);
-	memcpy(wrapper->buffer, wrapper->buffer + count, wrapper->buffer_pos - count);
+	memmove(wrapper->buffer, wrapper->buffer + count, wrapper->buffer_pos - count);
 	wrapper->buffer_pos -= count;
 	return 0;
 }
@@ -316,7 +323,7 @@ char *buffered_fd_read_until_delemiter(struct buffered_fd_t *wrapper, char delem
 	}
 	memcpy(ret, wrapper->buffer, newline_pos + 1);
 	ret[newline_pos + 1] = 0;
-	memcpy(wrapper->buffer, wrapper->buffer + newline_pos + 1, wrapper->buffer_pos - newline_pos);
+	memmove(wrapper->buffer, wrapper->buffer + newline_pos + 1, wrapper->buffer_pos - newline_pos);
 	wrapper->buffer_pos -= newline_pos + 1;
 	return ret;
 }
@@ -334,7 +341,7 @@ char *buffered_fd_read_until_token(struct buffered_fd_t *wrapper, const char *to
 		if(buffered_fd_fill_buffer(wrapper, wrapper->buffer_pos + 1) < 0) {
 			return NULL;
 		}
-		if(wrapper->buffer_pos < wrapper->buffer_size) wrapper->buffer[wrapper->buffer_pos] = 0;
+		wrapper->buffer[wrapper->buffer_pos] = 0;
 	}
 	if(is_crlf && *found == '\r') {
 		char *alternative = strstr(wrapper->buffer, "\n\n");
@@ -349,7 +356,7 @@ char *buffered_fd_read_until_token(struct buffered_fd_t *wrapper, const char *to
 	}
 	memcpy(ret, wrapper->buffer, found - wrapper->buffer + token_length);
 	ret[found - wrapper->buffer + token_length] = 0;
-	memcpy(wrapper->buffer, found + token_length, wrapper->buffer_pos - (found - wrapper->buffer));
+	memmove(wrapper->buffer, found + token_length, wrapper->buffer_pos - (found - wrapper->buffer));
 	wrapper->buffer_pos -= (found - wrapper->buffer) + token_length;
 
 	return ret;
@@ -399,7 +406,7 @@ char *extract_header(const char *headers, const char *header) {
 	}
 
 	char *ret = (char *)malloc(header_end - header_pos);
-	memcpy(ret, header_pos, header_end - header_pos - 1);
+	memmove(ret, header_pos, header_end - header_pos - 1);
 	ret[header_end - header_pos - 1] = 0;
 
 	return ret;
@@ -529,7 +536,7 @@ int client_read_request(struct buffered_fd_t *socket_wrapper, struct request_t *
 }
 
 int client_read_post_data(struct buffered_fd_t *socket_wrapper, struct request_t *request, int fd_target, int forward_chunk_headers_to_target) {
-	if(strcmp(request->method, "POST") != 0) {
+	if(strcmp(request->method, "POST") != 0 && strcmp(request->method, "PUT") != 0) {
 		return -1;
 	}
 
@@ -671,7 +678,10 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 		}
 		struct stat file_info;
 		memset(&file_info, 0, sizeof(struct stat));
-		char *full_file = alloca(strlen(request.uri) + 2);
+		if(strlen(request.uri) + 2 > PATH_MAX) {
+			client_fail_with_error(socket_wrapper, &request, 400);
+		}
+		char full_file[PATH_MAX];
 		full_file[0] = '.';
 		urldecode(full_file + 1, request.uri);
 		char *hash_part = strchr(full_file, '#');
@@ -693,7 +703,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 			char *target_file = htaccess_rewrite_url(full_file + 1);
 			if(target_file) {
 				// htaccess rewriting was successful
-				full_file = alloca(strlen(target_file) + 3);
+				char full_file[PATH_MAX];
 				full_file[0] = '.';
 				int index = 1;
 				if(full_file[0] != '/') {
@@ -731,10 +741,33 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 		}
 		else if(S_ISDIR(file_info.st_mode)) {
 			client_flush_post_data(socket_wrapper, &request);
-			if(full_file[strlen(full_file) - 1] != '/') {
+
+			// Display directory index if this is a directory and one exists
+			int found_index = 0;
+			char alternative[PATH_MAX];
+			const char **index_name;
+			for(index_name = directory_index_extensions; *index_name; index_name++) {
+				snprintf(alternative, PATH_MAX, "%s/index%s", full_file, *index_name);
+				if(access(alternative, F_OK) == 0) {
+					// Redirect to directory index
+					char header[PATH_MAX + 1024];
+					const char *index_prefix = "index";
+					if(full_file[strlen(full_file) - 1] != '/') {
+						index_prefix = "/index";
+					}
+					int header_length = snprintf(header, PATH_MAX + 1024, "HTTP/1.1 302 Found\r\nConnection: %s\r\nTransfer-Encoding: chunked\r\nLocation: %s%s%s\r\n\r\n0\r\n\r\n", connection_type, full_file + 1, index_prefix, *index_name);
+					send(socket, header, header_length, 0);
+					found_index = 1;
+				}
+			}
+
+			if(found_index) {
+				// Nothing
+			}
+			else if(full_file[strlen(full_file) - 1] != '/') {
 				// Redirect to file with slash in the end
-				char *header = alloca(100 + strlen(request.uri));
-				int header_length = snprintf(header, PATH_MAX + 1024, "HTTP/1.1 301 Permanent redirect\r\nConnection: %s\r\nTransfer-Encoding: chunked\r\nLocation: %s/\r\n\r\n0\r\n\r\n", connection_type, request.uri);
+				char header[PATH_MAX + 1024];
+				int header_length = snprintf(header, PATH_MAX + 1024, "HTTP/1.1 301 Moved permamently\r\nConnection: %s\r\nTransfer-Encoding: chunked\r\nLocation: %s/\r\n\r\n0\r\n\r\n", connection_type, request.uri);
 				send(socket, header, header_length, 0);
 			}
 			else {
@@ -798,7 +831,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 					close(1);
 					dup2(child_reader[1], 1);
 
-					char *child_envp[11];
+					char *child_envp[40];
 					child_envp[0] = "GATEWAY_INTERFACE=CGI/1.1";
 					env_var_assign(&child_envp[1], "SERVER_PROTOCOL", request.http_version);
 					env_var_assign(&child_envp[2], "REQUEST_METHOD", request.method);
@@ -829,6 +862,28 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 					if(path_info) {
 						env_var_assign(&child_envp[++header_count], "PATH_INFO", path_info);
 					}
+					char *header_ptr = request.headers;
+					while(header_count < 39) {
+						while(*header_ptr == '\r' || *header_ptr == '\n' || *header_ptr == ' ') header_ptr++;
+						char *next_colon = strchr(header_ptr, ':');
+						if(!next_colon) break;
+						char the_header[128];
+						memcpy(the_header, header_ptr, next_colon - header_ptr);
+						the_header[next_colon - header_ptr] = 0;
+						char *header_contents = extract_header(request.headers, the_header);
+						if(!header_contents) {
+							plog(L_ERROR, "Failed to find field `%s' in headers though it should be there", the_header);
+							break;
+						}
+						char header_name[128];
+						strcpy(header_name, "HTTP_");
+						int i;
+						for(i=0; i<127 && the_header[i]; i++) header_name[i + 5] = the_header[i] == '-' ? '_' : toupper(the_header[i]);
+						header_name[i + 5] = 0;
+						env_var_assign(&child_envp[++header_count], header_name, header_contents);
+						header_ptr = next_colon + 1 + strlen(header_contents) + 2;
+						free(header_contents);
+					}
 					child_envp[++header_count] = NULL;
 
 					const char *const child_argv[] = {
@@ -846,7 +901,6 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 				close(child_reader[1]);
 
 				// Write POST data to child
-				// TODO Problems with long post data
 				client_read_post_data(socket_wrapper, &request, child_writer[1], 1);
 				fsync(child_writer[1]);
 				close(child_writer[1]);
