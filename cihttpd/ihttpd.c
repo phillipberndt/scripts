@@ -4,6 +4,11 @@
 // for strcasestr
 #define _GNU_SOURCE
 
+#include <sys/wait.h>
+
+#include <ctype.h>
+#include <sys/sendfile.h>
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <limits.h>
 #include <netdb.h>
@@ -114,7 +119,7 @@ const char *find_cgi_helper(const char *file) {
 #define L_FATAL 1
 
 #if LOG_LEVEL > 0
-static int plog(int level, const char *fmt, ...) {
+static void plog(int level, const char *fmt, ...) {
 	if(level > LOG_LEVEL) return;
 
 	FILE *file = level < L_INFO ? stderr : stdout;
@@ -162,7 +167,6 @@ static int plog(int level, const char *fmt, ...) {
 #include <regex.h>
 
 char *htaccess_rewrite_url(const char *unescaped_url_ptr) {
-	char *retval = NULL;
 	char path[PATH_MAX];
 
 	char rewritten[PATH_MAX];
@@ -174,7 +178,7 @@ char *htaccess_rewrite_url(const char *unescaped_url_ptr) {
 	int did_rewrite = 0;
 
 	char *slash_pos;
-	for(slash_pos = strrchr(unescaped_url, '/'); slash_pos; (slash_pos = strrchr(unescaped_url, '/')) && slash_pos > path) {
+	for(slash_pos = strrchr(unescaped_url, '/'); slash_pos && slash_pos > path; slash_pos = strrchr(unescaped_url, '/')) {
 		*slash_pos = 0;
 		snprintf(path, PATH_MAX, ".%s/.htaccess", unescaped_url);
 		if(access(path, R_OK) == 0) {
@@ -183,7 +187,7 @@ char *htaccess_rewrite_url(const char *unescaped_url_ptr) {
 
 			char line[2048];
 			char *line_worker;
-			while(line_worker = fgets(line, 2048, htaccess_file)) {
+			while((line_worker = fgets(line, 2048, htaccess_file))) {
 				while(*line_worker == ' ' || *line_worker == '\t') line_worker++;
 				if(strncasecmp(line_worker, "rewriterule", 11) != 0) continue;
 				while(*line_worker != ' ' && *line_worker != '\t' && *line_worker != 0) line_worker++;
@@ -201,7 +205,7 @@ char *htaccess_rewrite_url(const char *unescaped_url_ptr) {
 				regex_t regex;
 				int regex_error;
 				plog(L_DEBUG, "Match %s against %s", unescaped_url_ptr, regex_string);
-				if(regex_error = regcomp(&regex, regex_string, REG_ICASE | REG_EXTENDED)) {
+				if((regex_error = regcomp(&regex, regex_string, REG_ICASE | REG_EXTENDED))) {
 					char err_str[255];
 					regerror(regex_error, &regex, err_str, 255);
 					plog(L_WARN, "Failed to compile regex `%s' in %s: %s", regex_string, path, err_str);
@@ -309,7 +313,6 @@ int buffered_fd_read(struct buffered_fd_t *wrapper, char *buffer, size_t count) 
 
 char *buffered_fd_read_until_delemiter(struct buffered_fd_t *wrapper, char delemiter) {
 	size_t newline_pos = 0;
-	int n_th_run = 0;
 	while(newline_pos < wrapper->buffer_pos && wrapper->buffer[newline_pos] != delemiter) newline_pos++;
 	while(wrapper->buffer[newline_pos] != delemiter) {
 		if(buffered_fd_fill_buffer(wrapper, wrapper->buffer_pos + 1) < 0) {
@@ -413,7 +416,6 @@ char *extract_header(const char *headers, const char *header) {
 }
 
 void client_send_error(struct buffered_fd_t *socket_wrapper, int code) {
-
 	char buf[1024];
 	const char *message;
 	switch(code) {
@@ -518,9 +520,9 @@ int client_read_request(struct buffered_fd_t *socket_wrapper, struct request_t *
 	if((*request_work_after != '\r' || request_work_after[1] != '\n') && *request_work_after != '\n') {
 		for(; *request_work_after; request_work_after++) {
 			if     (state == 0 && *request_work_after == ':') state = 1;
-			else if(state == 0 && *request_work_after > ' ') 1;
+			else if(state == 0 && *request_work_after > ' ');
 			else if(state == 1 && *request_work_after == '\n') state = 2;
-			else if(state == 1) 1;
+			else if(state == 1);
 			else if(state == 2 && (*request_work_after == ' ' || *request_work_after == '\t')) state = 1;
 			else if(state == 2 && (*request_work_after == '\r' || *request_work_after == '\n')) break;
 			else if(state == 2) state = 0;
@@ -531,7 +533,6 @@ int client_read_request(struct buffered_fd_t *socket_wrapper, struct request_t *
 		}
 	}
 
-	plog(L_INFO, "%s %s %s", request->http_version, request->method, request->uri);
 	return TRUE;
 }
 
@@ -613,10 +614,6 @@ int client_read_post_data(struct buffered_fd_t *socket_wrapper, struct request_t
 			free(post_data_buffer);
 			line = buffered_fd_read_until_delemiter(socket_wrapper, '\n');
 			if(line) {
-				if(line[0] != '\n' && (line[0] != '\r' || line[1] != '\n')) {
-					free(request->raw_head_data);
-					client_fail_with_error(socket_wrapper, request, 400);
-				}
 				if(fd_target > 0 && forward_chunk_headers_to_target) {
 					write(fd_target, line, strlen(line));
 				}
@@ -624,6 +621,7 @@ int client_read_post_data(struct buffered_fd_t *socket_wrapper, struct request_t
 			}
 		}
 	}
+	return 0;
 }
 
 void client_flush_post_data(struct buffered_fd_t *socket_wrapper, struct request_t *request) {
@@ -647,11 +645,12 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 	struct buffered_fd_t *socket_wrapper = buffered_fd_new(socket);
 
 	char client_hostname[NI_MAXHOST];
-	char client_ip[64];
-	inet_ntop(client_info.client_addr.sa_family, &((struct sockaddr_in *)&client_info.client_addr)->sin_addr, client_ip, 64);
+	char client_ip[INET6_ADDRSTRLEN];
+	inet_ntop(client_info.client_addr.sa_family, &((struct sockaddr_in6 *)&client_info.client_addr)->sin6_addr, client_ip, INET6_ADDRSTRLEN);
 	int errcode;
 	if((errcode = getnameinfo(&client_info.client_addr, client_info.client_addr_length, client_hostname, NI_MAXHOST, NULL, 0, 0)) != 0) {
 		plog(L_WARN, "Incoming connection with an unresolvable remote side from %s: %s [%d]", client_ip, gai_strerror(errcode), errcode);
+		*client_hostname = 0;
 	}
 	else {
 		plog(L_DEBUG, "Incoming connection from %s [%s]", client_ip, client_hostname);
@@ -664,6 +663,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 		if(!client_read_request(socket_wrapper, &request)) {
 			client_fail_with_error(socket_wrapper, &request, 400);
 		}
+		plog(L_INFO, "%s [%s]: %s %s %s", client_hostname, client_ip, request.http_version, request.method, request.uri);
 
 		int is_keep_alive = 1;
 		const char *connection_type = "keep-alive";
@@ -780,7 +780,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 				DIR *dir = opendir(full_file);
 				struct dirent *dir_contents;
 				if(readdir(dir) && strcmp(".", request.uri) != 0) {
-					while(dir_contents = readdir(dir)) {
+					while((dir_contents = readdir(dir))) {
 						char buf[255 * 2 + 10];
 						if(dir_contents->d_type == DT_DIR) {
 							int pos = strlen(dir_contents->d_name);
@@ -798,7 +798,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 				closedir(dir);
 			}
 		}
-		else if(!file_info.st_mode & S_IROTH) {
+		else if(!(file_info.st_mode & S_IROTH)) {
 			client_flush_post_data(socket_wrapper, &request);
 			client_send_error(socket_wrapper, 404);
 		}
@@ -1023,7 +1023,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 
 				close(child_reader[0]);
 				int status;
-				waitpid(child, NULL, &status, 0);
+				waitpid(child, &status, 0);
 
 				if(cgi_content_length > 0) {
 					// There were bytes left to send. Abort connection.
@@ -1040,7 +1040,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 				char header[1024];
 
 				size_t file_length = file_info.st_size;
-				size_t file_start = 0;
+				off_t file_start = 0;
 
 				char *range_header = extract_header(request.headers, "range");
 				if(range_header) {
@@ -1130,11 +1130,11 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 	fsync(socket);
 	close(socket);
 	buffered_fd_destroy(socket_wrapper);
+	return NULL;
 }
 
 int create_server(unsigned int port) {
-	// TODO Listen on v6 also
-	int server_socket = socket(AF_INET, SOCK_STREAM, 0);
+	int server_socket = socket(AF_INET6, SOCK_STREAM, 0);
 	if(!server_socket) {
 		plog(L_FATAL, "Failed to create socket");
 	}
@@ -1144,10 +1144,10 @@ int create_server(unsigned int port) {
 		plog(L_FATAL, "Failed to set reuse socket option");
 	}
 
-	struct sockaddr_in server_addr;
-	memset(&server_addr, 0, sizeof(struct sockaddr_in));
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_port = htons(port);
+	struct sockaddr_in6 server_addr;
+	memset(&server_addr, 0, sizeof(struct sockaddr_in6));
+	server_addr.sin6_family = AF_INET6;
+	server_addr.sin6_port = htons(port);
 
 	if(bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
 		return 0;
@@ -1168,9 +1168,11 @@ int main(int argc, char *argv[]) {
 
 	int server_socket = create_server(port);
 	if(!server_socket) {
-		plog(L_FATAL, "Failed to create socket on port %d", port);
+		plog(L_FATAL, "Failed to create socket on port %d: %m", port);
 	}
-	listen(server_socket, 5);
+	if(listen(server_socket, 5) < 0) {
+		plog(L_FATAL, "Failed to listen on port %d: %m", port);
+	}
 	plog(L_INFO, "Created server on port %d", port);
 
 #ifdef USE_MAGIC
@@ -1183,7 +1185,7 @@ int main(int argc, char *argv[]) {
 	struct sockaddr client_addr;
 	socklen_t client_addr_length = sizeof(struct sockaddr);
 	int client_socket;
-	while(client_socket = accept(server_socket, &client_addr, &client_addr_length)) {
+	while((client_socket = accept(server_socket, &client_addr, &client_addr_length))) {
 		struct client_thread_data_t *data;
 		data = malloc(sizeof(struct client_thread_data_t));
 		data->client_addr = client_addr;
@@ -1198,5 +1200,6 @@ int main(int argc, char *argv[]) {
 	}
 
 	plog(L_INFO, "Terminating");
+	return 0;
 }
 
