@@ -1092,7 +1092,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 					send(socket, header, length, 0);
 				}
 				else {
-					int length = snprintf(header, 1024, "HTTP/1.1 200 Ok\r\nConnection: %s\r\nContent-Type: %s\r\nContent-Length: %lu\r\n\r\n",
+					int length = snprintf(header, 1024, "HTTP/1.1 200 Ok\r\nConnection: %s\r\nContent-Type: %s\r\nContent-Length: %lu\r\nAccept-Ranges: bytes\r\n\r\n",
 						connection_type,
 						type,
 						file_info.st_size);
