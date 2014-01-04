@@ -368,8 +368,8 @@ char *buffered_fd_read_until_token(struct buffered_fd_t *wrapper, const char *to
 void urldecode(char *dest, const char *uri) {
 	for(; *uri; uri++, dest++) {
 		if(*uri == '%' && uri[1] && uri[2]) {
-			*dest = (uri[1] >= 'a' ? uri[1] - 'a' + 10 : uri[1] - '0') * 16 +
-			        (uri[2] >= 'a' ? uri[2] - 'a' + 10 : uri[2] - '0');
+			*dest = (uri[1] >= 'a' ? uri[1] - 'a' + 10 : uri[1] >= 'A' ? uri[1] - 'A' + 10 : uri[1] - '0') * 16 +
+			        (uri[2] >= 'a' ? uri[2] - 'a' + 10 : uri[2] >= 'A' ? uri[2] - 'A' + 10 : uri[2] - '0');
 			uri += 2;
 		}
 		else {
@@ -684,6 +684,7 @@ void *client_thread(struct client_thread_data_t *client_info_ptr) {
 		char full_file[PATH_MAX];
 		full_file[0] = '.';
 		urldecode(full_file + 1, request.uri);
+		plog(L_WARN, "%s", full_file);
 		char *hash_part = strchr(full_file, '#');
 		if(hash_part) {
 			*hash_part = 0;
