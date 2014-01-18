@@ -193,7 +193,9 @@ fi
 
 # Set the $DISPLAY variable if it is not set and the user has an open session
 if [ -z "$DISPLAY" ]; then
-	eval `ck-list-sessions | awk "/^Session/{right=0} /unix-user = '$UID'/{right=1} /x11-display = '(.+)'/{ if(right == 1) printf(\"DISPLAY=%s\n\", \\\$3); }";`
+	if which ck-list-sessions &>/dev/null; then
+		eval `ck-list-sessions | awk "/^Session/{right=0} /unix-user = '$UID'/{right=1} /x11-display = '(.+)'/{ if(right == 1) printf(\"DISPLAY=%s\n\", \\\$3); }";`
+	fi
 fi
 
 # Show a todo list after startup
