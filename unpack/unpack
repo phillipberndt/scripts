@@ -824,7 +824,7 @@ if __name__ == '__main__':
 	# Remove files which look as if they are part of a removed multi-file archive
 	if removeFiles:
 		sout("good", "These files look associated to removed files:")
-		removeFiles = filter(lambda f: os.access(f, os.F_OK), removeFiles)
+		removeFiles = filter(lambda f: os.access(f, os.F_OK) and not os.path.isdir(f), removeFiles)
 		for sfile in removeFiles:
 				print "  -", sfile
 		if askYesNo("Delete them?"):
