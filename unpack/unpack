@@ -16,6 +16,10 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 24.01.2014
+#    Added libarchive support
+#    Fixed .gz file extension
+#    Fixed a bug where the script tried to delete directories which look related to an archive
 #  - 14.05.2013
 #    Fixed xz support
 #  - 12.05.2013
