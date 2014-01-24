@@ -182,7 +182,7 @@ LHAFile = defaultTypeGenerator(r"\.lha", "application/x-lha", "lha", "lha x `ech
 ARJFile = defaultTypeGenerator(r"\.arj", "application/x-arj", "arj", "arj x `echo $PARAMS` \"$FILE\" \"$DEST\"")
 CPIOfile = defaultTypeGenerator(r"\.cpio", "application/x-cpio", "cpio", "cat \"$FILE\" | (cd \"$DEST\" && cpio -i --no-absolute-filenames --make-directories `echo $PARAMS`)")
 BZ2File = defaultTypeGenerator(r"\.bz2", "application/x-bzip2", "bzip2", "cat \"$FILE\" | (cd \"$DEST\"; bzip2 -d `echo $PARAMS` > `basename $FILE .bz2`)")
-GZFile = defaultTypeGenerator(r"\.bz2", "application/x-gzip", "gzip", "cat \"$FILE\" | (cd \"$DEST\"; gzip -d `echo $PARAMS` > `basename $FILE .gz`)")
+GZFile = defaultTypeGenerator(r"\.gz", "application/x-gzip", "gzip", "cat \"$FILE\" | (cd \"$DEST\"; gzip -d `echo $PARAMS` > `basename $FILE .gz`)")
 sevenZExecutable = "7zr"
 if os.system("which 7zr >/dev/null 2>&1") != 0:
 	if os.system("which 7z >/dev/null 2>&1") == 0:
