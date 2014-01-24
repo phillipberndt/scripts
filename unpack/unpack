@@ -443,6 +443,54 @@ class LZMAFile(filetype): # {{{
 		fnlzma = cls.file[:-5]
 		return os.system("cat %s | (cd %s; lzma %s -d > %s)" % (se(cls.file), se(destination), params, se(fnlzma))) == 0
 # }}}
+
+# libarchive support {{{
+libarchive = False
+try:
+	import ctypes
+	libarchive = ctypes.CDLL("libarchive.so.13")
+	libarchive.archive_read_new.restype = ctypes.c_void_p
+	libarchive.archive_compression_name.restype = ctypes.c_char_p
+	libarchive.archive_format_name.restype = ctypes.c_char_p
+	libarchive.archive_error_string.restype = ctypes.c_char_p
+	libarchive.archive_entry_pathname.restype = ctypes.c_char_p
+except:
+	pass
+if libarchive:
+	class LibArchiveHandler(filetype):
+		@classmethod
+		def canHandle(cls, file):
+			ret = False
+			r = libarchive.archive_read_new()
+			libarchive.archive_read_support_format_all(r)
+			libarchive.archive_read_support_filter_all(r)
+			if libarchive.archive_read_open_filename(r, file, 1024) == 0:
+				ret = True
+				sout("good", "libarchive can handle this file. File type is %s/%s" % (libarchive.archive_format_name(r), libarchive.archive_compression_name(r)))
+			#else:
+			#	sout("warn", "libarchive can not handle this file: %s" % libarchive.archive_error_string(r))
+			libarchive.archive_read_free(r)
+			return ret
+
+		def unpack(cls, destination, **parameters):
+			success = True
+			r = libarchive.archive_read_new()
+			libarchive.archive_read_support_format_all(r)
+			libarchive.archive_read_support_filter_all(r)
+			libarchive.archive_read_open_filename(r, cls.file, 1024)
+			oldcwd = os.getcwd()
+			os.chdir(destination)
+			h = ctypes.c_void_p()
+			while libarchive.archive_read_next_header(r, ctypes.pointer(h)) == 0:
+				print libarchive.archive_entry_pathname(h)
+				if libarchive.archive_read_extract(r, h, 0) != 0:
+					sout("fail", "libarchive returned with an error: %s" % libarchive.archive_error_string(r))
+					success = False
+					break
+			os.chdir(oldcwd)
+			libarchive.archive_read_free(r)
+			return success
+# }}}
 # }}}
 # Search for a matching file type {{{
 def guessType(file):
