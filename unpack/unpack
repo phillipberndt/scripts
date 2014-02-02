@@ -97,6 +97,7 @@ class filetype(object): # {{{
 		Default filetype base class. Derive all download classes from
 		this one. Only direct subclasses will be taken into account!
 	"""
+	PRIORITY = 0 # Lower is better
 	# Regex to match against the end of the filename
 	TYPE_DEF = "" # Regex to match against the end of the filename
 	TYPE_MIME_DEF = "" # Regex to match against the output of "file -NLbzi"
@@ -195,12 +196,9 @@ ARJFile = defaultTypeGenerator(r"\.arj", "application/x-arj", "arj", "arj x `ech
 CPIOfile = defaultTypeGenerator(r"\.cpio", "application/x-cpio", "cpio", "cat \"$FILE\" | (cd \"$DEST\" && cpio -i --no-absolute-filenames --make-directories `echo $PARAMS`)")
 BZ2File = defaultTypeGenerator(r"\.bz2", "application/x-bzip2", "bzip2", "cat \"$FILE\" | (cd \"$DEST\"; bzip2 -d `echo $PARAMS` > `basename $FILE .bz2`)")
 GZFile = defaultTypeGenerator(r"\.gz", "application/x-gzip", "gzip", "cat \"$FILE\" | (cd \"$DEST\"; gzip -d `echo $PARAMS` > `basename $FILE .gz`)")
-sevenZExecutable = "7zr"
-if os.system("which 7zr >/dev/null 2>&1") != 0:
-	if os.system("which 7z >/dev/null 2>&1") == 0:
-		sevenZExecutable = "7z"
-	else:
-		sevenZExecutable = "7za"
+for sevenZExecutable in ("7z", "7za", "7zr"):
+	if os.system("which " + sevenZExecutable + " >/dev/null 2>&1") == 0:
+		break
 SEVENZFile = defaultTypeGenerator(r"\.7z", "^$", sevenZExecutable, sevenZExecutable + " x `echo $PARAMS` -o$DEST $FILE")
 MSIFile = defaultTypeGenerator(r"\.msi", "", sevenZExecutable, sevenZExecutable + " x `echo $PARAMS` -o$DEST $FILE")
 ISOFile = defaultTypeGenerator(r"\.iso", "application/x-iso9660", sevenZExecutable, sevenZExecutable + " x `echo $PARAMS` -o$DEST $FILE")
@@ -462,6 +460,7 @@ except:
 	pass
 if libarchive:
 	class LibArchiveHandler(filetype):
+		PRIORITY = 99
 		@classmethod
 		def canHandle(cls, file):
 			ret = False
@@ -504,7 +503,7 @@ def guessType(file):
 		installed.
 	"""
 	gfile = file.lower()
-	for cls in filetype.__subclasses__():
+	for cls in sorted(filetype.__subclasses__(), key=lambda i: i.PRIORITY):
 		if (cls.canHandle(file) or cls.extensionMatches(gfile)) and cls.toolsAvailable():
 			return cls
 	if os.system("which file >/dev/null") == 0:
