@@ -16,6 +16,8 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 18.02.2014
+#    squashfs support
 #  - 24.01.2014
 #    Added libarchive support
 #    Fixed .gz file extension
@@ -445,6 +447,36 @@ class LZMAFile(filetype): # {{{
 		fnlzma = cls.file[:-5]
 		return os.system("cat %s | (cd %s; lzma %s -d > %s)" % (se(cls.file), se(destination), params, se(fnlzma))) == 0
 # }}}
+class SquashFSFile(filetype): # {{{
+	TYPE_DEF = r"\.squashfs"
+	TYPE_MIME_DEF = ""
+	__slots__ = [ "file" ]
+	@classmethod
+	def canHandle(cls, file):
+		try:
+			fileLine = os.popen("file %s" % se(file)).read()
+			if "Squashfs filesystem" in fileLine:
+				return True
+		except:
+			pass
+		return False
+	@classmethod
+	def mimeTypeMatches(cls, type):
+		return False
+	@classmethod
+	def toolsAvailable(cls):
+		if not os.system("which unsquashfs >/dev/null") == 0:
+			sout("warn", "You need unsquashfs to decompress this file")
+			return False
+		return True
+	def unpack(cls, destination, **parameters):
+		if "parameters" in parameters:
+			params = parameters["parameters"]
+		else:
+			params = ""
+		return os.system("unsquashfs %s -f -d %s %s" % (params, se(destination), se(cls.file))) == 0
+# }}}
+
 
 # libarchive support {{{
 libarchive = False
@@ -503,16 +535,13 @@ def guessType(file):
 		installed.
 	"""
 	gfile = file.lower()
-	for cls in sorted(filetype.__subclasses__(), key=lambda i: i.PRIORITY):
-		if (cls.canHandle(file) or cls.extensionMatches(gfile)) and cls.toolsAvailable():
-			return cls
+	fileTypeGuess = False
 	if os.system("which file >/dev/null") == 0:
-		sout("warn", "Filetype unknown. Trying to use `file` to determine filetype")
-		fileTypeGuess = os.popen("file -NLbzi %r" % file).read().strip()
-		for cls in filetype.__subclasses__():
-			if cls.mimeTypeMatches(fileTypeGuess) and cls.toolsAvailable():
-				return cls
-
+		fileTypeGuess = os.popen("file -NLbzi %s" % se(file)).read().strip()
+	for cls in sorted(filetype.__subclasses__(), key=lambda i: i.PRIORITY):
+		if ((cls.canHandle(file) or cls.extensionMatches(gfile) or (fileTypeGuess and cls.mimeTypeMatches(fileTypeGuess)))
+			and cls.toolsAvailable()):
+			return cls
 	return False
 # }}}
 # Fancy output {{{
@@ -600,7 +629,7 @@ def helpMessage():
 		"  -s	Keep extracted files in a subdirectory\n"
 		"  -r	Remove archives after unpacking\n\n"
 		" Supported formats:\n"
-		"  zip, jar, rar, tar bz2, tar, tar gz, 7z, cab, lha, arj, rpm, cpio, run (Makeself), deb, MIME mails"
+		"  zip, jar, rar, tar, 7z, bz2, gz, cab, lha, arj, rpm, cpio, run (Makeself), deb, MIME mails, squashfs, iso, lzma"
 		"\n\n")
 # }}} 
 # Filename hooks {{{
