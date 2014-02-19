@@ -33,19 +33,20 @@ case "$TERM" in
                 bindkey "^[[8~" end-of-line             # End
         ;;
 esac
+#
+# Activate the local site directory
+fpath=(~/.zsh/site/ $fpath)
 
 # Activate completion
 autoload -Uz compinit
 compinit
+compdef _unpack unpack
 zstyle ':completion:*:descriptions' format '%U%B%d%b%u'
 zstyle ':completion:*:warnings' format '%BSorry, no matches for: %d%b'
 zstyle ':completion:*' menu select
 
 # Enable correction
 setopt correct
-
-# Activate the local site directory
-fpath=(~/.zsh/site/ $fpath)
 
 # Gentoo prompt and window title with path names
 autoload -U promptinit

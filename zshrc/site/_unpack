@@ -1,0 +1,16 @@
+#compdef unpack
+#
+# Completion file for unpack
+# Usually overridden by default ZSH _pack, need to redefine later in zshrc!
+#
+
+_unpack() {
+	_arguments \
+		'-d[Specify target directory]' \
+		'-p[Pass parameters on to the extractor]' \
+		'-i[Ignore return value of extractor, assume it worked]' \
+		'-s[Keep extracted files in a subdirectory]' \
+		'-r[Remove archives after unpacking]' \
+		':compressed file:_files -g "*.{zip,jar,rar,tar,7z,bz2,gz,cab,lha,arj,rpm,cpio,run,deb,mime,squashfs,iso,lzma,image}"'
+}
+_unpack "$@"
