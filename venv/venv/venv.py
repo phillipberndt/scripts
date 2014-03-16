@@ -27,6 +27,9 @@ import tty
 import urllib
 from abc import *
 
+LIB_DIR_64BIT = "x86_64-linux-gnu"
+LIB_DIR_32BIT = "i386-linux-gnu"
+
 def parse_options(): #{{{
 	"""
 		Parse command line options
@@ -226,13 +229,22 @@ def add_ld_preload(library):#{{{
 	"""
 		Add a library to be put into LD_PRELOAD before finally entering the
 		environment.
-		
+
 		This is better than adding it directly in enter() because other
 		class'es enter() methods could spawn other processed which would then
 		include the LD_PRELOAD-variable
+
+		This function has built-in multi-arch support: If you supply
+		 /foo/bar/libbaz.so
+		and
+		 /foo/bar/x86_64-linux-gnu/libbaz.so
+		exists, it adds $LIB as an intermediate path (see ld.so(8) manpage)
 	"""
-	
+
 	global add_ld_preload__preloaded
+	l_dir, l_file = os.path.split(library)
+	if os.access(l_dir + "/" + LIB_DIR_64BIT + "/" + l_file, os.F_OK):
+		library = "/".join(l_dir.split("/")[:-1]) + "/${LIB}/" + l_file
 	add_ld_preload__preloaded += library + ":"
 #}}}
 def set_ld_preload():#{{{
@@ -372,14 +384,24 @@ class SandboxProvider(VirtualEnvironmentProvider):#{{{
 		basename = os.path.basename(distfile)
 		install_sh = os.path.join(download_path, "install.sh")
 		with open(install_sh, "w") as file:
-			print >> file, "cd '%s' || exit 1" % (download_path.replace("'", r"\'"))
-			print >> file, "wget '%s' || exit 1" % (distfile.replace("'", r"\'"))
-			print >> file, "tar axf '%s' || exit 1" % (basename.replace("'", r"\'"))
-			print >> file, "cd */ || exit 1"
-			print >> file, "./configure --prefix='%s' || exit 1" % (install_path.replace("'", r"\'"))
-			print >> file, "make || exit 1"
-			print >> file, "make install || exit 1"
-			print >> file, "exit 0"
+			print >> file, "\n".join((
+				"cd '%s' || exit 1" % (download_path.replace("'", r"\'")),
+				"wget '%s' || exit 1" % (distfile.replace("'", r"\'")),
+				"tar axf '%s' || exit 1" % (basename.replace("'", r"\'")),
+				"cd */ || exit 1",
+				"./configure --prefix='%s' || exit 1" % (install_path.replace("'", r"\'")),
+				"make || exit 1",
+				"make install || exit 1",
+				"mkdir '%s/lib/%s'" % (install_path.replace("'", r"\'"), LIB_DIR_64BIT),
+				"mkdir '%s/lib/%s'" % (install_path.replace("'", r"\'"), LIB_DIR_32BIT),
+				"ln -s '../libsandbox.so' '%s/lib/%s/'" % (install_path.replace("'", r"\'"), LIB_DIR_64BIT),
+				"make clean || exit 1",
+				"export CFLAGS='-m32'",
+				"./configure --prefix='%s' || exit 1" % (install_path.replace("'", r"\'")),
+				"make || exit 1",
+				"mv ./libsandbox/.libs/libsandbox.so '%s/lib/%s/libsandbox.so' || exit 1" % (install_path.replace("'", r"\'"), LIB_DIR_32BIT),
+				"exit 0"
+			))
 		status("Installing sandbox")
 		if os.system("bash '%s'" % (install_sh)) != 0:
 			status("Failed to install sandbox", "err")
@@ -391,16 +413,20 @@ class SandboxProvider(VirtualEnvironmentProvider):#{{{
 			print >> file, "cd '%s' || exit 1" % (download_path.replace("'", r"\'"))
 			for sfile in ("libpwwrapper.c", "Makefile"):
 				print >> file, "wget 'https://raw.github.com/phillipberndt/scripts/master/venv/libpwwrapper/%s' || exit 1" % (sfile.replace("'", r"\'"))
-			print >> file, "make || exit 1"
-			print >> file, "mv libpwwrapper.so '%s/lib/libpwwrapper.so' || exit 1" % (install_path.replace("'", r"\'"))
-			print >> file, "exit 0"
+			print >> file, "\n".join(
+				"make || exit 1",
+				"mv libpwwrapper.so '%s/lib/libpwwrapper.so' || exit 1" % (install_path.replace("'", r"\'")),
+				"ln -s '../libpwrapper.so' '%s/lib/%s/'" % (install_path.replace("'", r"\'"), LIB_DIR_64BIT),
+				"mv libpwwrapper32.so '%s/lib/%s/libpwwrapper.so' || exit 1" % (install_path.replace("'", r"\'"), LIB_DIR_32BIT),
+				"exit 0",
+			)
 		if os.system("bash '%s'" % (install_sh)) != 0:
 			status("Failed to install libpwwrapper", "err")
 		else:
 			status("Installed libpwrapper")
 
 		os.system("rm -rf '%s'" % (download_path.replace("'", r"\'")))
-	
+
 	@staticmethod
 	def initialize(config):
 		config["has_sandbox"] = True
