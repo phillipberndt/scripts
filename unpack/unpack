@@ -665,7 +665,7 @@ def hookURLDownload(file):
 			if axelRet == 2:
 				# User aborted
 				success = False
-			success == axelRet == 0
+			success = axelRet == 0
 		if success:
 			# Axel did it
 			pass
