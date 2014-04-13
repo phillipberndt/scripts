@@ -363,14 +363,10 @@ class RPMFile(filetype): # {{{
 		# 1) Skip Lead
 		offset = 96
 		# 2) Skip the Header structure
-		first = True
 		while archiveHead[offset:offset + 3] == "\x8e\xad\xe8":
 			offset += 3 + 1 + 4
 			entries, length = struct.unpack(">II", archiveHead[offset:offset + 8])
 			offset += 8 + 16 * entries + length
-			if first:
-				offset += 4
-				first = False
 		# Unpack
 		if offset > -1:
 			sout("good", "Found archive offset")
