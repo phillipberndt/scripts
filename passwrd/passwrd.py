@@ -111,7 +111,10 @@ def window_name(window):#{{{
 		if query.parent == query.root:
 			return "-unknown-"
 		window = query.parent
-		wm_name = window.get_wm_name()
+		try:
+			wm_name = window.get_wm_name()
+		except:
+			pass
 	return wm_name
 #}}}
 def send_string(window, text):#{{{
