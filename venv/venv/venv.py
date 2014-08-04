@@ -413,13 +413,13 @@ class SandboxProvider(VirtualEnvironmentProvider):#{{{
 			print >> file, "cd '%s' || exit 1" % (download_path.replace("'", r"\'"))
 			for sfile in ("libpwwrapper.c", "Makefile"):
 				print >> file, "wget 'https://raw.github.com/phillipberndt/scripts/master/venv/libpwwrapper/%s' || exit 1" % (sfile.replace("'", r"\'"))
-			print >> file, "\n".join(
+			print >> file, "\n".join((
 				"make || exit 1",
 				"mv libpwwrapper.so '%s/lib/libpwwrapper.so' || exit 1" % (install_path.replace("'", r"\'")),
 				"ln -s '../libpwrapper.so' '%s/lib/%s/'" % (install_path.replace("'", r"\'"), LIB_DIR_64BIT),
 				"mv libpwwrapper32.so '%s/lib/%s/libpwwrapper.so' || exit 1" % (install_path.replace("'", r"\'"), LIB_DIR_32BIT),
 				"exit 0",
-			)
+			))
 		if os.system("bash '%s'" % (install_sh)) != 0:
 			status("Failed to install libpwwrapper", "err")
 		else:
