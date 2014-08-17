@@ -85,8 +85,8 @@ Contents:
 
   1) A script for Debian based systems which allows non-root users to install
      missing packages into their own $PREFIXes. It basically invokes apt-get to
-     get the URLs to the package and its dependencies and then downloads all the
-     files and unpacks them whereever the user wants them. Includes basic
+     get the URLs to the package and its dependencies and then downloads all
+     the files and unpacks them whereever the user wants them. Includes basic
      tracking for already satisfied dependencies.
   2) A script to copy already installed packages and all their dependencies
      into a given directory. Useful to set up chroots.
@@ -94,10 +94,10 @@ Contents:
 
 * venv
   
-  A tool to setup virtual environments for more than just python. Also contains a
-  library which hooks into getpwent and replaces the home-directory with $HOME -
-  this is required in GTK apps since GTK ignores $HOME and uses passwd entries
-  instead.
+  A tool to setup virtual environments for more than just python. Also contains
+  a library which hooks into getpwent and replaces the home-directory with
+  $HOME - this is required in GTK apps since GTK ignores $HOME and uses passwd
+  entries instead.
 
 * lock
 
@@ -105,5 +105,5 @@ Contents:
 
 * pydoce
 
-  A tool to open python source code in an editor, not by specifying the file name,
-  but instead the pythonic path to a definition (i.e. os.path.isdir).
+  A tool to open python source code in an editor, not by specifying the file
+  name, but instead the pythonic path to a definition (i.e. os.path.isdir).
