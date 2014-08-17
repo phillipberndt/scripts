@@ -102,3 +102,8 @@ Contents:
 * lock
 
   A very simple X11 locking app. Screen blanking & PAM authentication only.
+
+* pydoce
+
+  A tool to open python source code in an editor, not by specifying the file name,
+  but instead the pythonic path to a definition (i.e. os.path.isdir).

@@ -1,0 +1,68 @@
+#!/usr/bin/python
+"""
+    pydoce
+
+    Open the definition of a python obect in an editor
+
+    Usage:
+        pydoce path.to.object
+
+    Examples:
+        pydoce os.path.isdir
+        pydoce django.core.files.File
+
+    Copyright (c) 2014, Phillip Berndt
+    License: BSD-License
+
+"""
+import inspect
+import importlib
+import os
+import sys
+
+# Select editor to use
+editor = os.environ["EDITOR"] if "EDITOR" in os.environ else "vim"
+if editor == "vim" and "DISPLAY" in os.environ:
+    editor = "gvim"
+
+# Show a short help
+if len(sys.argv) != 2:
+    print >> sys.stderr, __doc__
+    sys.exit(0)
+
+# Split path argument into module and local part For example, in os.path.isdir,
+# os.path is a module and isdir is local to that module
+imp_part = sys.argv[1].split(".")
+loc_part = []
+
+while imp_part:
+    try:
+        mod = importlib.import_module(".".join(imp_part))
+    except:
+        loc_part.insert(0, imp_part.pop())
+    else:
+        break
+
+if not mod:
+    print "Module %s not found" % sys.argv[1]
+    sys.exit(1)
+
+# The module has been loaded above, now determine the local part. This is
+# required because a module might itself only import the desired symbol, and we
+# want to show the user that symbol's definition, not the import
+obj = mod
+
+while loc_part:
+    obj = getattr(obj, loc_part.pop(0))
+
+# Use the inspect module to determine file/line of defition
+file = inspect.getsourcefile(obj)
+_, line = inspect.getsourcelines(obj)
+
+# Some editors might support to jump to a line directly
+params = []
+if "vi" in editor or "emacs" in editor:
+    params.append("+%d" % line)
+
+# Invoke editor
+os.execvp(editor, [ editor, file ] + params)
