@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """
     pydoce
 
@@ -35,14 +35,22 @@ if len(sys.argv) != 2:
 imp_part = sys.argv[1].split(".")
 loc_part = []
 
+mod = None
 while imp_part:
     try:
-        mod = importlib.import_module(".".join(imp_part))
+        imp_name = ".".join(imp_part)
+        mod = importlib.import_module(imp_name)
+    except ImportError, e:
+        if e.message[-len(imp_part[-1]):] == imp_part[-1] or e.message[-len(imp_name)] == imp_name:
+            loc_part.insert(0, imp_part.pop())
+            continue
+        print >> sys.stderr, "\033[31mImporting %s worked, but threw an exception:\n\033[0m" % imp_name
+        raise
     except:
-        loc_part.insert(0, imp_part.pop())
+        print >> sys.stderr, "\033[31mImporting %s worked, but threw an exception:\n\033[0m" % imp_name
+        raise
     else:
         break
-
 if not mod:
     print "Module %s not found" % sys.argv[1]
     sys.exit(1)
