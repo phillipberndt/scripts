@@ -4,7 +4,7 @@
 #
 
 _pydoce() {
-	python -c 'import jedi; print "\n".join([x.full_name + x.complete for x in jedi.Interpreter("import '${words[2]}'").complete()])' | while read name; do
+	python -c 'import jedi; q="'${words[2]}'"; print "\n".join([q + x.complete for x in jedi.Script("import "+q).complete()])' | while read name; do
 		compadd -q -S "." $name
 	done
 }
