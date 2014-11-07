@@ -107,3 +107,10 @@ Contents:
 
   A tool to open python source code in an editor, not by specifying the file
   name, but instead the pythonic path to a definition (i.e. os.path.isdir).
+
+* livereload
+
+  An implementation of a livereload server backend. I know that tons of
+  ruby/node.js tools serve the same purpose, however, I wanted something
+  that is small and works out of the box on my PCs. (Which usually have
+  Python installed, but neither ruby nor node.)
