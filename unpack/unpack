@@ -1,7 +1,8 @@
 #!/usr/bin/python
+# vim:noexpandtab:ts=8:sw=8
 #
 # Unpacking script
-# Copyright (c) 2008-2009, Phillip Berndt
+# Copyright (c) 2008-2014, Phillip Berndt
 #
 # No documentation required, I guess. Just run `unpack -h` for
 # command line stuff. This script is very simple. If you extend
@@ -16,6 +17,8 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 16.12.2014
+#    Fixed RPM support (Correctly skip header, LZMA archive through recursive unpack invocation)
 #  - 27.02.2014
 #    If axel fails, retry download with more reliable tool
 #  - 18.02.2014
@@ -357,15 +360,25 @@ class RPMFile(filetype): # {{{
 	def unpack(cls, destination, **parameters):
 		if "parameters" in parameters and parameters["parameters"]:
 			sout("warn", "RPM extraction does not support additional parameters")
-		# Find RPM offset
+		# We parse the RPM ourselves
+		# See http://www.rpm.org/max-rpm/s1-rpm-file-format-rpm-file-format.html for RPM file structure
 		sout("good", "Searching rpm for archive file offset")
 		archiveHead = open(cls.file).read(1024**2 * 2)
-		# 1) Skip Lead
+		# Check if this realls is a RPM file
+		if archiveHead[:4] != "\xed\xab\xee\xdb":
+		    sout("bad", "This does not look like an RPM file")
+		    return False
+		# Skip Lead
 		offset = 96
-		# 2) Skip the Header structure
-		while archiveHead[offset:offset + 3] == "\x8e\xad\xe8":
+		# Skip the Header structures
+		header_count = 0
+		while archiveHead[offset:offset + 3] == "\x8e\xad\xe8" and header_count < 2:
+			header_count += 1
 			offset += 3 + 1 + 4
 			entries, length = struct.unpack(">II", archiveHead[offset:offset + 8])
+			if header_count == 1:
+				# Pad to multiplier of 8; undocumented, but the Perl module does this as well
+				length += 8 - (length % 8) if length % 8 != 0 else 0
 			offset += 8 + 16 * entries + length
 		# Unpack
 		if offset > -1:
@@ -375,7 +388,10 @@ class RPMFile(filetype): # {{{
 			elif archiveHead[offset:offset+6] == "\xFD\x37\x7A\x58\x5A\x00":
 				return os.system("dd ibs=%d skip=1 if=%s 2>/dev/null | xz -d | (cd %s && cpio -i --no-absolute-filenames --make-directories)" % (offset, se(cls.file), se(destination))) == 0
 			else:
-				sout("bad", "Unknown archive format")
+				sout("warn", "Unknown archive format: %r. Falling back to recursive unpack." % (archiveHead[offset:offset+4]))
+				temporary_archive = "%s/package.compressed" % destination
+				os.system("dd ibs=%d skip=1 if=%s 2>/dev/null > %s" % (offset, se(cls.file), se(temporary_archive)))
+				return recursive_unpack(destination, temporary_archive)
 		else:
 			sout("bad", "Failed to find archive offset")
 # }}}
@@ -611,6 +627,27 @@ else:
 			except:
 				pass
 		return choice
+# }}}
+# Recursive unpack {{{
+def recursive_unpack(destination, temporary_archive):
+	sout("good", "Recursive unpack of %s" % temporary_archive)
+	file_type = guessType(temporary_archive)
+	if file_type:
+		temporary_target = "%s/target" % destination
+		os.mkdir(temporary_target)
+		if file_type(temporary_archive).unpack(temporary_target):
+			os.unlink(temporary_archive)
+			created = os.listdir(temporary_target)
+			if "target" in created:
+				alt_name = "target"
+				while alt_name in created:
+					alt_name += "_"
+				os.system("mv %s %s" % (se(temporary_target), se("%s/%s" % (destination, alt_name))))
+				temporary_target = "%s/%s" % (destination, alt_name)
+			os.system("mv %s/* %s" % (se(temporary_target), se(destination)))
+			os.rmdir(temporary_target)
+			return True
+	return False
 # }}}
 # Help message {{{
 def helpMessage():
