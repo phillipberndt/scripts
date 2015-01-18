@@ -45,3 +45,7 @@ Currently, this project consists of:
    * mod_rewrite (does not support RewriteCond, as above)
    * Thread-based
 
+* megad - Monolithic version of all python daemons above
+
+  Still in development. The goal is to eventually kill this repository and move
+  this to the scripts repository.
