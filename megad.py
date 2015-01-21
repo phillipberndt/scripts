@@ -26,6 +26,251 @@ except ImportError:
 class ReusableServer(SocketServer.ThreadingTCPServer):
     allow_reuse_address = True
 
+class FtpHandler(SocketServer.StreamRequestHandler):
+    # See http://tools.ietf.org/html/rfc959
+    #     http://cr.yp.to/ftp/list/eplf.html
+    def reply(self, line):
+        if "\n" in line:
+            lines = line.split("\n")
+            code, rest = line[0].split(None, 1)
+            lines = [ "%s-%s" % (code, rest) ] + lines[1:-1] + [ "%s %s" % (code, lines[-1]) ]
+            self.wfile.write("%s\n" % "\n".join(lines))
+        else:
+            self.wfile.write("%s\n" % line)
+
+    def handle(self):
+        is_authenticated = False
+        self.reply("220 Service ready for new user.")
+        while True:
+            command = self.rfile.readline().strip()
+            if not command:
+                break
+            print command
+            command = command.split(None, 1)
+
+            if command[0] == "USER":
+                self.reply("331 User name okay, need password.") # or 230 ok
+                continue
+            elif command[0] == "PASS":
+                self.reply("230 User logged in, proceed.")
+                is_authenticated = True
+                continue
+            elif command[0] == "NOOP":
+                self.reply("200 No operation.")
+                continue
+            else:
+                if not is_authenticated:
+                    self.reply("530 Not logged in")
+                    continue
+
+            if command[0] == "SYST":
+                self.reply("215 UNIX")
+            elif command[0] == "QUIT":
+                self.reply("221 Goodbye")
+                break
+            elif command[0] == "TYPE":
+                self.reply("200 No operation.")
+            elif command[0] == "MODE":
+                if command[1] != "Stream":
+                    self.reply("504 Command not implemented for that parameter.")
+                else:
+                    self.reply("200 Fine with me")
+            elif command[0] == "STRU":
+                if command[1] != "File":
+                    self.reply("504 Command not implemented for that parameter.")
+                else:
+                    self.reply("200 Fine with me")
+            elif command[0] == "PORT":
+                self.reply("200 Command okay.")
+            elif command[0] == "PASV":
+                self.reply("227 Entering Passive Mode (h1,h2,h3,h4,p1,p2).")
+            else:
+                self.reply("502 Command not implemented.")
+
+            # USER <SP> <username> <CRLF>
+            # PASS <SP> <password> <CRLF>
+            # ACCT <SP> <account-information> <CRLF>
+            # CWD  <SP> <pathname> <CRLF>
+            # CDUP <CRLF>
+            # SMNT <SP> <pathname> <CRLF>
+            # QUIT <CRLF>
+            # REIN <CRLF>
+            # PORT <SP> <host-port> <CRLF>
+            # PASV <CRLF>
+            # TYPE <SP> <type-code> <CRLF>
+            # STRU <SP> <structure-code> <CRLF>
+            # MODE <SP> <mode-code> <CRLF>
+            # RETR <SP> <pathname> <CRLF>
+            # STOR <SP> <pathname> <CRLF>
+            # STOU <CRLF>
+            # APPE <SP> <pathname> <CRLF>
+            # ALLO <SP> <decimal-integer>
+            #     [<SP> R <SP> <decimal-integer>] <CRLF>
+            # REST <SP> <marker> <CRLF>
+            # RNFR <SP> <pathname> <CRLF>
+            # RNTO <SP> <pathname> <CRLF>
+            # ABOR <CRLF>
+            # DELE <SP> <pathname> <CRLF>
+            # RMD  <SP> <pathname> <CRLF>
+            # MKD  <SP> <pathname> <CRLF>
+            # PWD  <CRLF>
+            # LIST [<SP> <pathname>] <CRLF>
+            # NLST [<SP> <pathname>] <CRLF>
+            # SITE <SP> <string> <CRLF>
+            # SYST <CRLF>
+            # STAT [<SP> <pathname>] <CRLF>
+            # HELP [<SP> <string>] <CRLF>
+            # NOOP <CRLF>
+
+#            Connection Establishment
+#               120
+#                  220
+#               220
+#               421
+#            Login
+#               USER
+#                  230
+#                  530
+#                  500, 501, 421
+#                  331, 332
+#               PASS
+#                  230
+#                  202
+#                  530
+#                  500, 501, 503, 421
+#                  332
+#               ACCT
+#                  230
+#                  202
+#                  530
+#                  500, 501, 503, 421
+#               CWD
+#                  250
+#                  500, 501, 502, 421, 530, 550
+#               CDUP
+#                  200
+#                  500, 501, 502, 421, 530, 550
+#               SMNT
+#                  202, 250
+#                  500, 501, 502, 421, 530, 550
+#            Logout
+#               REIN
+#                  120
+#                     220
+#                  220
+#                  421
+#                  500, 502
+#               QUIT
+#                  221
+#                  500
+#            Transfer parameters
+#               PORT
+#                  200
+#                  500, 501, 421, 530
+#               PASV
+#                  227
+#                  500, 501, 502, 421, 530
+#               MODE
+#                  200
+#                  500, 501, 504, 421, 530
+#               TYPE
+#                  200
+#                  500, 501, 504, 421, 530
+#               STRU
+#                  200
+#                  500, 501, 504, 421, 530
+#            File action commands
+#               ALLO
+#                  200
+#                  202
+#                  500, 501, 504, 421, 530
+#               REST
+#                  500, 501, 502, 421, 530
+#                  350
+#               STOR
+#                  125, 150
+#                     (110)
+#                     226, 250
+#                     425, 426, 451, 551, 552
+#                  532, 450, 452, 553
+#                  500, 501, 421, 530
+#               STOU
+#                  125, 150
+#                     (110)
+#                     226, 250
+#                     425, 426, 451, 551, 552
+#                  532, 450, 452, 553
+#                  500, 501, 421, 530
+#               RETR
+#                  125, 150
+#                     (110)
+#                     226, 250
+#                     425, 426, 451
+#                  450, 550
+#                  500, 501, 421, 530
+#               LIST
+#                  125, 150
+#                     226, 250
+#                     425, 426, 451
+#                  450
+#                  500, 501, 502, 421, 530
+#               NLST
+#                  125, 150
+#                     226, 250
+#                     425, 426, 451
+#                  450
+#                  500, 501, 502, 421, 530
+#               APPE
+#                  125, 150
+#                     (110)
+#                     226, 250
+#                     425, 426, 451, 551, 552
+#                  532, 450, 550, 452, 553
+#                  500, 501, 502, 421, 530
+#               RNFR
+#                  450, 550
+#                  500, 501, 502, 421, 530
+#                  350
+#               RNTO
+#                  250
+#                  532, 553
+#                  500, 501, 502, 503, 421, 530
+#               DELE
+#                  250
+#                  450, 550
+#                  500, 501, 502, 421, 530
+#               RMD
+#                  250
+#                  500, 501, 502, 421, 530, 550
+#               MKD
+#                  257
+#                  500, 501, 502, 421, 530, 550
+#               PWD
+#                  257
+#                  500, 501, 502, 421, 550
+#               ABOR
+#                  225, 226
+#                  500, 501, 502, 421
+#            Informational commands
+#               SYST
+#                  215
+#                  500, 501, 502, 421
+#               STAT
+#                  211, 212, 213
+#                  450
+#                  500, 501, 502, 421, 530
+#               HELP
+#                  211, 214
+#                  500, 501, 502, 421
+#            Miscellaneous commands
+#               SITE
+#                  200
+#                  202
+#                  500, 501, 530
+#               NOOP
+#                  200
+#                  500 421
+
 # TODO FTP server
 # TODO Avahi announcement
 # TODO ngrok support (?!)
@@ -286,7 +531,12 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("main")
 
 servers = []
+
 server, port = setup_tcp_server(HttpHandler, 1234)
+servers.append(server)
+logger.info("HTTP server started on port %d", port)
+
+server, port = setup_tcp_server(FtpHandler, 1235)
 servers.append(server)
 logger.info("HTTP server started on port %d", port)
 
