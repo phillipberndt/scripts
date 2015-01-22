@@ -8,17 +8,21 @@ import SocketServer
 import StringIO
 import datetime
 import getopt
+import grp
+import itertools
 import logging
 import mimetypes
 import os
 import pwd
-import grp
+import shutil
 import signal
 import socket
 import sys
 import threading
 import time
 import traceback
+
+from wsgiref.handlers import format_date_time
 
 # TODO ngrok support (?!)
 
@@ -486,29 +490,30 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 fd_copy(self.rfile, target_file, chunk_size)
             self.read_http_headers()
 
+    def send_header(self, status, headers):
+        if "Host" not in headers:
+            headers["Host"] = self.headers["host"][0] if "host" in self.headers else socket.gethostbyname()
+        if "Connection" not in headers:
+            headers["Connection"] = self.headers["connection"][0] if "connection" in self.headers else ("Keep-Alive" if self.http_version.lower() == "http/1.1" else "Close")
+        self.wfile.write("%s %s\r\n%s\r\n\r\n" % (self.http_version, status, "\r\n".join([
+            "%s: %s" % (name, value) for name, value in headers.items()
+        ])))
+
     def send_error(self, error_message, force_close=False, details=""):
         if ("content-length" in self.headers or "transfer-encoding" in self.headers) and not ("expect" in self.headers and "100-continue" in self.headers["expect"]):
             force_close = True
         if force_close:
             self.headers["connection"] = [ "close" ]
-        body = "<!DOCTYPE HTML><title>%s</title><body><h1>%s</h1><pre>%s</pre>" % (error_message, error_message, html_escape(details))
-        connection_mode = self.headers["connection"][0] if "connection" in self.headers else ("Keep-Alive" if self.http_version == "http/1.1" else "Close")
-        self.wfile.write("\r\n".join([
-            "%s %s" % (self.http_version, error_message),
-            "Content-Length: %d" % len(body),
-            "Content-Type: text/html",
-            "Host: %s" % (self.headers["host"][0] if "host" in self.headers else socket.gethostname()),
-            "Connection: %s" % connection_mode,
-            "",
-            ""]))
+        body = "<!DOCTYPE HTML><title>%s</title><body><h1>%s</h1><pre>%s</pre>" % (error_message, error_message, xml_escape(details))
+        self.send_header(error_message, { "Content-Length": len(body), "Content-Type": "text/html" })
         self.wfile.write(body)
 
     def handle_request_for_file(self):
         if os.path.isdir(self.mapped_path):
             mime_type = "text/html"
-            data = [ "<!DOCTYPE HTML><title>Directory contents for %(path)s</title><body><h1>Directory contents for %(path)s</h1><ul>" % { "path": html_escape(self.path) } ]
+            data = [ "<!DOCTYPE HTML><title>Directory contents for %(path)s</title><body><h1>Directory contents for %(path)s</h1><ul>" % { "path": xml_escape(self.path) } ]
             base = self.path + ("/" if self.path[-1] != "/" else "")
-            data.append("<li><a href='%s'>..</a></li>" % html_escape(os.path.join(base, "..")))
+            data.append("<li><a href='%s'>..</a></li>" % xml_escape(os.path.join(base, "..")))
 
             dirs = []
             files = []
@@ -516,13 +521,13 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             for name in os.listdir(self.mapped_path):
                 absname = os.path.join(self.mapped_path, name)
                 if os.path.isdir(absname):
-                    dirs.append("<li><a href='%s'>%s/</a></li>" % (html_escape(os.path.join(base, name)), html_escape(name)))
+                    dirs.append("<li><a href='%s'>%s/</a></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
                 else:
                     file_mime_type = mimetypes.guess_type(absname)[0] or "application/octet-stream"
                     if has_gtk and gtk.icon_theme_get_default().has_icon(file_mime_type.replace("/", "-")):
-                        files.append("<li><img src='/.directory-icons/%s'> <a href='%s'>%s</a></li>" % (file_mime_type.replace("/", "-"), html_escape(os.path.join(base, name)), html_escape(name)))
+                        files.append("<li><img src='/.directory-icons/%s'> <a href='%s'>%s</a></li>" % (file_mime_type.replace("/", "-"), xml_escape(os.path.join(base, name)), xml_escape(name)))
                     else:
-                        files.append("<li><a href='%s'>%s</a></li>" % (html_escape(os.path.join(base, name)), html_escape(name)))
+                        files.append("<li><a href='%s'>%s</a></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
 
             data += dirs
             data += files
@@ -537,46 +542,116 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             file = open(self.mapped_path, "rb")
 
         status = "200 Ok"
-
         self.reply_with_file_like_object(file, size, mime_type, status)
 
     def reply_with_file_like_object(self, file, size, mime_type, status):
         range_header = ""
         start = 0
+        headers = {}
         if "range" in self.headers:
             req_range_type, req_range = self.headers["range"][0].split("=")
             range_start, range_end = req_range.split("-")
             range_start = int(range_start) if range_start else 0
             range_end = int(range_end) if range_end else (size - 1)
             if req_range_type.lower() != "bytes" or range_start < 0 or range_end < range_start or range_end > size:
-                print self.headers["range"]
                 self.send_error("416 Range Not Satisfiable")
                 return
             status = "206 Partial Content"
-            range_header = "Content-Range: bytes %d-%d/%d\r\n" % (range_start, range_end, size)
+            headers["Content-Range"] = "bytes %d-%d/%d\r\n" % (range_start, range_end, size)
             start = range_start
             size = range_end - range_start + 1
 
         file.seek(start)
 
-        connection_mode = self.headers["connection"][0] if "connection" in self.headers else ("Keep-Alive" if self.http_version == "http/1.1" else "Close")
-        self.wfile.write("\r\n".join([
-            "%s %s" % (self.http_version, status),
-            "Content-Length: %d" % size,
-            "Content-Type: %s" % mime_type,
-            "Accept-Ranges: bytes",
-            "Host: %s" % self.headers["host"][0],
-            "Connection: %s" % connection_mode,
-            range_header,
-            ""]))
-        fd_copy(file, self.wfile, size)
+        headers["Content-Length"] = size
+        headers["Content-Type"] = mime_type
+        headers["Accept-Ranges"] = "bytes"
+        self.send_header(status, headers)
+        if self.method.lower() != "head":
+            fd_copy(file, self.wfile, size)
         file.close()
 
+    def handle_dav_request(self):
+        method = self.method.upper()
+        if method == "OPTIONS":
+            self.read_http_body()
+            self.send_header("200 Ok", {
+                "Allow": "OPTIONS, GET, HEAD, POST, PUT, DELETE, COPY, MOVE, MKCOL, PROPFIND" if "write_access" in self.options and self.options["write_access"] else "OPTIONS, GET, HEAD, POST, PUT, PROPFIND",
+                "DAV": "1, 2, ordered-collections",
+                "Content-Length": 0 })
+        elif method == "PROPFIND":
+            self.read_http_body()
+            response = StringIO.StringIO()
+            response.write("<?xml version='1.0' encoding='utf-8'?>\r\n<D:multistatus xmlns:D='DAV:'>")
+            if os.path.isdir(self.mapped_path):
+                if "depth" in self.headers and self.headers["depth"][0] == "0":
+                    collection = [""]
+                elif "depth" in self.headers and self.headers["depth"][0] != "1":
+                    self.send_error("413 Request Entity Too Large")
+                    return
+                else:
+                    collection = itertools.chain([""], os.listdir(self.mapped_path))
+                for file_name in collection:
+                    file_path = os.path.join(self.mapped_path, file_name)
+                    if os.path.isdir(file_path):
+                        res_type = "<D:resourcetype><D:collection/></D:resourcetype>"
+                    else:
+                        res_type = "<D:resourcetype/><D:getcontentlength>%d</D:getcontentlength>" % (os.stat(file_path).st_size, )
+                    response.write("<D:response><D:href>%s%s%s</D:href><D:propstat><D:prop>%s</D:prop><D:status>HTTP/1.1 200 Ok</D:status></D:propstat></D:response>\r\n" % (self.path, "/" if self.path[-1] != "/" else "", file_name, res_type))
+            else:
+                stat = os.stat(self.mapped_path)
+                response.write(("<D:response><D:href>%s</D:href><D:propstat><D:prop>"
+                                "<D:resourcetype/><D:getcontentlength>%d</D:getcontentlength>"
+                                "<D:creationdate>%s</D:creationdate><D:getlastmodified>%s</D:getlastmodified><D:getcontenttype>%s</D:getcontenttype>"
+                                "</D:prop><D:status>HTTP/1.1 200 Ok</D:status></D:propstat></D:response>") %
+                               (self.path, stat.st_size, iso_time(stat.st_ctime), format_date_time(stat.st_mtime), mimetypes.guess_type(self.path)[0] or "application/octet-stream"))
+            response.write("</D:multistatus>\r\n")
+            response.seek(0)
+            self.reply_with_file_like_object(response, len(response.buf), "text/xml; charset=utf-8", "207 Multi-Status")
+        elif not "write_access" in self.options or not self.options["write_access"]:
+            self.read_http_body()
+            self.send_error("405 Method not allowed")
+        elif method == "PUT":
+            try:
+                target_file = open(self.mapped_path, "w")
+                self.read_http_body(target_file)
+                self.send_header("201 Created", { "Content-Length": 0 })
+            except:
+                self.send_error("403 Access denied")
+        elif method == "MKCOL":
+            try:
+                self.read_http_body()
+                os.mkdir(self.mapped_path)
+                self.send_header("201 Created", { "Content-Length": 0 })
+            except:
+                self.send_error("403 Access denied")
+            # as above, mkdir
+        elif method == "MOVE":
+            # TODO Parse URI, issue rename
+            print self.headers["destination"]
+            self.send_error("405 Method not allowed")
+            pass
+            # "Destination" header marks target URL, 200 Ok
+        elif method == "COPY":
+            # TODO Parse URI, issue copy shutil.copytree
+            self.send_error("405 Method not allowed")
+            # As "Move"
+        elif method == "DELETE":
+            try:
+                shutil.rmtree(self.mapped_path)
+                self.send_header("200 Ok", { "Content-Length": 0 })
+            except:
+                self.send_error("403 Access denied")
+            # Parameter bight be anything! 200 Ok
+            pass
+        else:
+            self.send_error("405 Method not allowed")
 
     def handle_request(self):
         if not self.read_http_method():
             self.rfile.close()
             return
+        self.headers = {}
         self.read_http_headers()
         if "host" not in self.headers:
             self.headers["host"] = [ socket.gethostname() ]
@@ -599,7 +674,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self.send_error("403 Access denied")
             return
 
-        self.read_http_body()
+        if "dav_enabled" in self.options and self.options["dav_enabled"] and self.method.upper() in ("PUT", "MKCOL", "DELETE"):
+            self.handle_dav_request()
+            return
 
         if not os.path.exists(self.mapped_path):
             logging.warn("[%s] 404 %s" % (self.client_address, self.path))
@@ -608,6 +685,13 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
         logging.info("[%s] %s" % (self.client_address, self.path))
 
+        if "dav_enabled" in self.options and self.options["dav_enabled"] and self.method.upper() in ("OPTIONS", "PROPFIND", "MOVE", "COPY"):
+            self.handle_dav_request()
+            return
+
+        self.read_http_body()
+        if self.method.lower() not in ("get", "post"):
+            self.send_error("405 Method not allowed")
         self.handle_request_for_file()
 
     def handle(self):
@@ -627,7 +711,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             if "connection" in self.headers:
                 if self.headers["connection"][0].lower() != "keep-alive":
                     break
-            elif self.http_version == "http/1.0":
+            elif self.http_version.lower() == "http/1.0":
                 break
 
     def finish(self):
@@ -636,7 +720,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         except:
             pass
 
-def html_escape(string):
+def xml_escape(string):
     "Escape special XML/HTML characters"
     return string.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
@@ -725,6 +809,10 @@ def create_avahi_group(service, port):
     # group.Reset()
     return group
 
+def iso_time(timestamp):
+    "Return an ISO 8601 formatted timestamp."
+    return time.strftime("%Y-%m-%dT%H:%M:%S.0Z", time.localtime(timestamp))
+
 
 # TODO Write getopt() interface and make everything configurable
 
@@ -733,7 +821,7 @@ logger = logging.getLogger("main")
 
 servers = []
 
-options = { "write_access": True }
+options = { "write_access": True, "dav_enabled": True }
 
 server, port = setup_tcp_server(HttpHandler, 1234, options)
 servers.append(server)
