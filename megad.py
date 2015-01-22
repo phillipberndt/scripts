@@ -6,16 +6,18 @@
 #
 import SocketServer
 import StringIO
+import datetime
 import getopt
 import logging
 import mimetypes
 import os
+import pwd
 import signal
 import socket
 import sys
 import threading
-import traceback
 import time
+import traceback
 
 try:
     import gtk
@@ -26,9 +28,31 @@ except ImportError:
 class ReusableServer(SocketServer.ThreadingTCPServer):
     allow_reuse_address = True
 
+    def __init__(self, server_address, RequestHandlerClass, options={}):
+        """Constructor.  May be extended, do not override."""
+        self.__options = options
+        SocketServer.ThreadingTCPServer.__init__(self, server_address, RequestHandlerClass)
+
+    def finish_request(self, request, client_address):
+        """Finish one request by instantiating RequestHandlerClass."""
+        self.RequestHandlerClass(request, client_address, self, options=self.__options)
+
 class FtpHandler(SocketServer.StreamRequestHandler):
     # See http://tools.ietf.org/html/rfc959
     #     http://cr.yp.to/ftp/list/eplf.html
+    logger  = logging.getLogger("ftp")
+
+    def __init__(self, request, client_address, server, options={}):
+        self.user = None
+        self.is_authenticated = False
+        self.current_path = ""
+        self.data_mode = { "mode": "PORT", "ip": client_address, "port": 20, "socket": None, "server_socket": None }
+
+        self.options = options
+        SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
+
+        #self.pasv_socket = setup_tcp_server_socket(1234 if "port" not in options else options["port"])
+
     def reply(self, line):
         if "\n" in line:
             lines = line.split("\n")
@@ -38,38 +62,98 @@ class FtpHandler(SocketServer.StreamRequestHandler):
         else:
             self.wfile.write("%s\n" % line)
 
+    def connect_data_socket(self):
+        if not self.data_mode["socket"]:
+            if self.data_mode["mode"] == "PORT":
+                self.data_mode["socket"] = socket.socket()
+                self.data_mode["socket"].connect((self.data_mode["ip"], self.data_mode["port"]))
+            else:
+                data_socket, remote = self.data_mode["server_socket"].accept()
+                logger.debug("Data connection from %s for %s accepted" % (remote, self.client_address))
+                self.data_mode["socket"] = data_socket
+
+    def disconnect_data_socket(self):
+        if self.data_mode["socket"]:
+            self.data_mode["socket"].shutdown(socket.SHUT_RDWR)
+            self.data_mode["socket"] = None
+
+    def reply_with_file(self, file):
+        self.reply("150 File status okay; about to open data connection.")
+        try:
+            self.connect_data_socket()
+        except:
+            self.reply("425 Can't open data connection.")
+            return
+        try:
+            fd_copy(file, self.data_mode["socket"].makefile("w"), -1)
+        except socket.error:
+            self.reply("426 Connection closed; transfer aborted.")
+            return
+        self.reply("226 Closing data connection.")
+        self.disconnect_data_socket()
+
+    def build_path(self, path, expect_file=False):
+        if not path:
+            return self.current_path
+        if path[0] == '"' and path[-1] == '"':
+            path = path[1:-1]
+        if path[0] == "/":
+            new_path = "%s/" % os.path.abspath(".%s" % path)
+        else:
+            new_path = "%s/" % os.path.abspath(os.path.join(self.current_path, path))
+        base_path = "%s/" % os.path.abspath(".")
+        if expect_file:
+            new_path = new_path[:-1]
+            check = os.path.isfile
+        else:
+            check = os.path.isdir
+        if new_path[:len(base_path)] != base_path or not check(new_path):
+            self.reply("550 No such file or directory.")
+            return False
+        return new_path[len(base_path):]
+
     def handle(self):
-        is_authenticated = False
+        logger.debug("Incoming FTP connection from %s" % (str(self.client_address), ))
         self.reply("220 Service ready for new user.")
         while True:
             command = self.rfile.readline().strip()
             if not command:
                 break
-            print command
+            logger.debug("%s: %s" % (self.client_address, command))
             command = command.split(None, 1)
 
+            # Authentication
             if command[0] == "USER":
-                self.reply("331 User name okay, need password.") # or 230 ok
+                if "user" in options and command[1] != options["user"]:
+                    self.reply("430 Invalid username or password")
+                elif "pass" in options:
+                    self.reply("331 User name okay, need password.")
+                    self.user = command[1]
+                else:
+                    self.reply("230 User logged in, proceed.")
+                    self.user = command[1]
+                    self.is_authenticated = True
                 continue
-            elif command[0] == "PASS":
+            elif command[0] == "PASS" and self.user:
                 self.reply("230 User logged in, proceed.")
-                is_authenticated = True
+                self.is_authenticated = True
                 continue
             elif command[0] == "NOOP":
                 self.reply("200 No operation.")
                 continue
             else:
-                if not is_authenticated:
+                if not self.is_authenticated:
                     self.reply("530 Not logged in")
                     continue
 
+            # Commands that do not require write permissions
             if command[0] == "SYST":
                 self.reply("215 UNIX")
             elif command[0] == "QUIT":
                 self.reply("221 Goodbye")
                 break
             elif command[0] == "TYPE":
-                self.reply("200 No operation.")
+                self.reply("202 Command not implemented, superfluous at this site.")
             elif command[0] == "MODE":
                 if command[1] != "Stream":
                     self.reply("504 Command not implemented for that parameter.")
@@ -80,10 +164,75 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                     self.reply("504 Command not implemented for that parameter.")
                 else:
                     self.reply("200 Fine with me")
-            elif command[0] == "PORT":
-                self.reply("200 Command okay.")
-            elif command[0] == "PASV":
-                self.reply("227 Entering Passive Mode (h1,h2,h3,h4,p1,p2).")
+            elif command[0] in ("PASV", "PORT"):
+                for which in ("socket", "server_socket"):
+                    if self.data_mode[which]:
+                        self.data_mode[which].shutdown(socket.SHUT_RDWR)
+                        self.data_mode[which] = None
+                if command[0] == "PASV":
+                    server_socket, port = setup_tcp_server_socket(1234 if "pasv_port" not in self.options else self.options["pasv_port"])
+                    server_socket.listen(1)
+                    self.data_mode = { "mode": "PASV", "ip": self.request.getsockname()[0], "port": port, "socket": None, "server_socket": server_socket }
+                    self.reply("227 Entering Passive Mode (%s,%d,%d)." % (self.data_mode["ip"].replace(".", ","), (self.data_mode["port"] & 0xFF00) >> 8, (self.data_mode["port"] & 0x00FF)))
+                else:
+                    port = command[1].split(",")
+                    self.data_mode = { "mode": "PORT", "ip": "%s.%s.%s.%s" % tuple(port[:4]), "port": (int(port[4]) << 8) + int(port[5]), "socket": None, "server_socket": None }
+                    self.reply("200 PORT command successful, connecting to %s:%d" % (self.data_mode["ip"], self.data_mode["port"]))
+            elif command[0] == "LIST":
+                response = StringIO.StringIO()
+
+                if len(command) > 1:
+                    path_components = [ x for x in command[1].split(" ") if x[0] != "-" ]
+                    path_string = " ".join(path_components)
+                    path = self.build_path(path_string)
+                    if path == False:
+                        continue
+                else:
+                    path = self.current_path
+
+                for element in os.listdir(path or "."):
+                    file_path = os.path.join(path, element)
+                    try:
+                        stat = os.stat(file_path)
+                    except:
+                        continue
+                    mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
+                    response.write("%c%c%c%c%c%c%c%c%c%c 1 %s %s %13d %s %3s %s %s\r\n" % (
+                        "d" if os.path.isdir(file_path) else "-",
+                        "r" if stat.st_mode & 00400 else "-",
+                        "w" if stat.st_mode & 00200 else "-",
+                        "x" if stat.st_mode & 00100 else "-",
+                        "r" if stat.st_mode & 00040 else "-",
+                        "w" if stat.st_mode & 00020 else "-",
+                        "x" if stat.st_mode & 00010 else "-",
+                        "r" if stat.st_mode & 00004 else "-",
+                        "w" if stat.st_mode & 00002 else "-",
+                        "x" if stat.st_mode & 00001 else "-",
+                        pwd.getpwuid(stat.st_uid).pw_name,
+                        stat.st_gid,
+                        stat.st_size,
+                        mtime.strftime("%b"),
+                        mtime.strftime("%d"),
+                        mtime.strftime("%H:%I") if mtime.strftime("%Y") == datetime.datetime.today().strftime("%Y") else  mtime.strftime("%Y"),
+                        element))
+                response.seek(0)
+                self.reply_with_file(response)
+            elif command[0] == "PWD":
+                self.reply("257 \"/%s\"" % self.current_path)
+            elif command[0] == "CWD":
+                new_path = self.build_path(command[1])
+                if new_path == False:
+                    continue
+                self.current_path = new_path
+                self.reply("200 \"/%s\"" % self.current_path)
+            elif command[0] == "RETR":
+                which_file = self.build_path(command[1], True)
+                if which_file == False:
+                    continue
+                self.reply_with_file(open(which_file, "r"))
+            elif command[0] == "CDUP":
+                self.current_path = "/".join(self.current_path.split("/")[:-1])
+                self.reply("200 \"/%s\"" % self.current_path)
             else:
                 self.reply("502 Command not implemented.")
 
@@ -281,9 +430,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     timeout = 10
     logger  = logging.getLogger("http")
 
-    def __init__(self, *args):
+    def __init__(self, request, client_address, server, options={}):
         self.headers = {}
-        SocketServer.StreamRequestHandler.__init__(self, *args)
+        self.options = options
+        SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
 
     def setup(self):
         SocketServer.StreamRequestHandler.setup(self)
@@ -481,25 +631,47 @@ def html_escape(string):
 
 def fd_copy(source_file, target_file, length):
     buffer = 10240
-    while length > 0:
-        data = source_file.read(min(buffer, min(length, 10240)))
-        if not data:
-            raise IOError("Failed to read data")
-        if target_file:
-            target_file.write(data)
-        length -= len(data)
+    if length < 0:
+        while True:
+            data = source_file.read(buffer)
+            if not data:
+                break
+            if target_file:
+                target_file.write(data)
+    else:
+        while length > 0:
+            data = source_file.read(min(buffer, min(length, 10240)))
+            if not data:
+                raise IOError("Failed to read data")
+            if target_file:
+                target_file.write(data)
+            length -= len(data)
 
-def setup_tcp_server(handler_class, base_port=1234):
+def setup_tcp_server(handler_class, base_port=1234, options={}):
     counter = 0
     while True:
         try:
-            server = ReusableServer(("", base_port + counter), handler_class)
+            server = ReusableServer(("", base_port + counter), handler_class, options=options)
             break
         except socket.error:
             counter += 1
             if counter > 100:
                 raise
     threading.Thread(target=server.serve_forever).start()
+    return server, base_port + counter
+
+def setup_tcp_server_socket(base_port=1234):
+    counter = 0
+    while True:
+        try:
+            server = socket.socket()
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(('', base_port + counter))
+            break
+        except socket.error:
+            counter += 1
+            if counter > 100:
+                raise
     return server, base_port + counter
 
 def wait_for_signal(servers):
@@ -532,11 +704,13 @@ logger = logging.getLogger("main")
 
 servers = []
 
-server, port = setup_tcp_server(HttpHandler, 1234)
+options = {}
+
+server, port = setup_tcp_server(HttpHandler, 1234, options)
 servers.append(server)
 logger.info("HTTP server started on port %d", port)
 
-server, port = setup_tcp_server(FtpHandler, 1235)
+server, port = setup_tcp_server(FtpHandler, 1235, options)
 servers.append(server)
 logger.info("HTTP server started on port %d", port)
 
