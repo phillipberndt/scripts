@@ -12,6 +12,7 @@ import logging
 import mimetypes
 import os
 import pwd
+import grp
 import signal
 import socket
 import sys
@@ -19,11 +20,29 @@ import threading
 import time
 import traceback
 
+# TODO ngrok support (?!)
+
 try:
     import gtk
     has_gtk = True
 except ImportError:
     has_gtk = False
+
+try:
+    import dbus
+    has_dbus = True
+except ImportError:
+    has_dbus = False
+
+try:
+    from avahi import DBUS_NAME, DBUS_PATH_SERVER, DBUS_INTERFACE_SERVER, DBUS_INTERFACE_ENTRY_GROUP, PROTO_UNSPEC, IF_UNSPEC
+except ImportError:
+    DBUS_NAME = "org.freedesktop.Avahi"
+    DBUS_PATH_SERVER = "/"
+    DBUS_INTERFACE_SERVER = "org.freedesktop.Avahi.Server"
+    DBUS_INTERFACE_ENTRY_GROUP = "org.freedesktop.Avahi.EntryGroup"
+    PROTO_UNSPEC = -1
+    IF_UNSPEC = -1
 
 class ReusableServer(SocketServer.ThreadingTCPServer):
     allow_reuse_address = True
@@ -38,31 +57,47 @@ class ReusableServer(SocketServer.ThreadingTCPServer):
         self.RequestHandlerClass(request, client_address, self, options=self.__options)
 
 class FtpHandler(SocketServer.StreamRequestHandler):
-    # See http://tools.ietf.org/html/rfc959
-    #     http://cr.yp.to/ftp/list/eplf.html
+    """
+        FTP server handler
+
+        Specific options:
+            - user: Username for authentication. If not set, any name is accepted.
+            - pass: Password for authentication. If not set, no password is required.
+            - write_access: Whether altering the file system is allowed
+
+        Protocol information:
+            http://tools.ietf.org/html/rfc959
+            http://cr.yp.to/ftp/list/eplf.html
+
+            This implementation should be RFC compliant. LIST output only has
+            `ls' style output included, which some clients might not be able to
+            parse. See the eplf link.
+    """
     logger  = logging.getLogger("ftp")
 
     def __init__(self, request, client_address, server, options={}):
         self.user = None
         self.is_authenticated = False
         self.current_path = ""
+        self.rest = 0
+        self.rename_target = ""
         self.data_mode = { "mode": "PORT", "ip": client_address, "port": 20, "socket": None, "server_socket": None }
 
         self.options = options
         SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
 
-        #self.pasv_socket = setup_tcp_server_socket(1234 if "port" not in options else options["port"])
-
     def reply(self, line):
-        if "\n" in line:
-            lines = line.split("\n")
-            code, rest = line[0].split(None, 1)
+        "Reply a status message in the `nnn Text' format. Multi-line messages are dealt with automatically."
+        if "\r\n" in line:
+            lines = line.split("\r\n")
+            code, rest = lines[0].split(None, 1)
             lines = [ "%s-%s" % (code, rest) ] + lines[1:-1] + [ "%s %s" % (code, lines[-1]) ]
-            self.wfile.write("%s\n" % "\n".join(lines))
+            self.wfile.write("%s\r\n" % "\r\n".join(lines))
         else:
-            self.wfile.write("%s\n" % line)
+            self.wfile.write("%s\r\n" % line)
 
     def connect_data_socket(self):
+        "Establish a data connection to the client. Does not handle errors. Handles PASV/PORT for you."
         if not self.data_mode["socket"]:
             if self.data_mode["mode"] == "PORT":
                 self.data_mode["socket"] = socket.socket()
@@ -73,11 +108,13 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 self.data_mode["socket"] = data_socket
 
     def disconnect_data_socket(self):
+        "Close any open data connection."
         if self.data_mode["socket"]:
             self.data_mode["socket"].shutdown(socket.SHUT_RDWR)
             self.data_mode["socket"] = None
 
-    def reply_with_file(self, file):
+    def reply_with_file(self, file, read_from_client=False):
+        "Send a file to or receive a file from the client. `file' should be an open file object."
         self.reply("150 File status okay; about to open data connection.")
         try:
             self.connect_data_socket()
@@ -85,14 +122,20 @@ class FtpHandler(SocketServer.StreamRequestHandler):
             self.reply("425 Can't open data connection.")
             return
         try:
-            fd_copy(file, self.data_mode["socket"].makefile("w"), -1)
+            if self.rest:
+                file.seek(self.rest)
+            if read_from_client:
+                fd_copy(self.data_mode["socket"].makefile("r"), file, -1)
+            else:
+                fd_copy(file, self.data_mode["socket"].makefile("w"), -1)
         except socket.error:
             self.reply("426 Connection closed; transfer aborted.")
             return
         self.reply("226 Closing data connection.")
         self.disconnect_data_socket()
 
-    def build_path(self, path, expect_file=False):
+    def build_path(self, path, expect="dir", must_exist=True):
+        "Build a path suitable for open() from a user specified path. Replies an error message for you if the path is not allowed."
         if not path:
             return self.current_path
         if path[0] == '"' and path[-1] == '"':
@@ -102,15 +145,59 @@ class FtpHandler(SocketServer.StreamRequestHandler):
         else:
             new_path = "%s/" % os.path.abspath(os.path.join(self.current_path, path))
         base_path = "%s/" % os.path.abspath(".")
-        if expect_file:
+        if expect == "file":
             new_path = new_path[:-1]
             check = os.path.isfile
+        elif expect == "any":
+            if os.path.isdir(new_path):
+                check = os.path.isdir
+            else:
+                new_path = new_path[:-1]
+                check = os.path.isfile
         else:
             check = os.path.isdir
-        if new_path[:len(base_path)] != base_path or not check(new_path):
+        if new_path[:len(base_path)] != base_path or (must_exist and not check(new_path)):
             self.reply("550 No such file or directory.")
             return False
         return new_path[len(base_path):]
+
+    def generate_directory_listing(self, path):
+        "Generate a `ls -l' style file listing and return it as a StringIO instance."
+        response = StringIO.StringIO()
+        if os.path.isdir(path or "."):
+            target = os.listdir(path or ".")
+        else:
+            target = [ path ]
+        for element in target:
+            if element == path and len(target) == 1:
+                file_path = path
+            else:
+                file_path = os.path.join(path, element)
+            try:
+                stat = os.stat(file_path)
+            except:
+                continue
+            mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
+            response.write("%c%c%c%c%c%c%c%c%c%c 1 %s %s %13d %s %3s %s %s\r\n" % (
+                "d" if os.path.isdir(file_path) else "-",
+                "r" if stat.st_mode & 00400 else "-",
+                "w" if stat.st_mode & 00200 else "-",
+                "x" if stat.st_mode & 00100 else "-",
+                "r" if stat.st_mode & 00040 else "-",
+                "w" if stat.st_mode & 00020 else "-",
+                "x" if stat.st_mode & 00010 else "-",
+                "r" if stat.st_mode & 00004 else "-",
+                "w" if stat.st_mode & 00002 else "-",
+                "x" if stat.st_mode & 00001 else "-",
+                pwd.getpwuid(stat.st_uid).pw_name,
+                grp.getgrgid(stat.st_gid).gr_name,
+                stat.st_size,
+                mtime.strftime("%b"),
+                mtime.strftime("%d"),
+                mtime.strftime("%H:%I") if mtime.strftime("%Y") == datetime.datetime.today().strftime("%Y") else  mtime.strftime("%Y"),
+                element))
+        response.seek(0)
+        return response
 
     def handle(self):
         logger.debug("Incoming FTP connection from %s" % (str(self.client_address), ))
@@ -119,10 +206,10 @@ class FtpHandler(SocketServer.StreamRequestHandler):
             command = self.rfile.readline().strip()
             if not command:
                 break
-            logger.debug("%s: %s" % (self.client_address, command))
+            logger.debug("[%s] Raw command: `%s'" % (self.client_address, command))
             command = command.split(None, 1)
 
-            # Authentication
+            # Authentication and unauthenticated commands
             if command[0] == "USER":
                 if "user" in options and command[1] != options["user"]:
                     self.reply("430 Invalid username or password")
@@ -132,38 +219,47 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 else:
                     self.reply("230 User logged in, proceed.")
                     self.user = command[1]
+                    logger.info("[%s] %s logged in." % (self.client_address, self.user))
                     self.is_authenticated = True
                 continue
             elif command[0] == "PASS" and self.user:
-                self.reply("230 User logged in, proceed.")
-                self.is_authenticated = True
+                if "pass" in self.options and command[1] != self.options["pass"]:
+                    self.reply("430 Invalid username or password")
+                else:
+                    self.reply("230 User logged in, proceed.")
+                    logger.info("[%s] %s logged in." % (self.client_address, self.user))
+                    self.is_authenticated = True
                 continue
-            elif command[0] == "NOOP":
+            elif command[0] in ("NOOP", "ALLO"):
                 self.reply("200 No operation.")
                 continue
+            elif command[0] == "SYST":
+                self.reply("215 UNIX")
+                continue
+            elif command[0] == "QUIT":
+                self.reply("221 Goodbye")
+                break
             else:
                 if not self.is_authenticated:
                     self.reply("530 Not logged in")
                     continue
 
             # Commands that do not require write permissions
-            if command[0] == "SYST":
-                self.reply("215 UNIX")
-            elif command[0] == "QUIT":
-                self.reply("221 Goodbye")
-                break
-            elif command[0] == "TYPE":
+            if command[0] == "TYPE":
                 self.reply("202 Command not implemented, superfluous at this site.")
+                continue
             elif command[0] == "MODE":
                 if command[1] != "Stream":
                     self.reply("504 Command not implemented for that parameter.")
                 else:
                     self.reply("200 Fine with me")
+                continue
             elif command[0] == "STRU":
-                if command[1] != "File":
+                if command[1] != "F":
                     self.reply("504 Command not implemented for that parameter.")
                 else:
                     self.reply("200 Fine with me")
+                continue
             elif command[0] in ("PASV", "PORT"):
                 for which in ("socket", "server_socket"):
                     if self.data_mode[which]:
@@ -178,255 +274,166 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                     port = command[1].split(",")
                     self.data_mode = { "mode": "PORT", "ip": "%s.%s.%s.%s" % tuple(port[:4]), "port": (int(port[4]) << 8) + int(port[5]), "socket": None, "server_socket": None }
                     self.reply("200 PORT command successful, connecting to %s:%d" % (self.data_mode["ip"], self.data_mode["port"]))
-            elif command[0] == "LIST":
-                response = StringIO.StringIO()
-
+                continue
+            elif command[0] in ("LIST", "STAT", "NLST"):
                 if len(command) > 1:
                     path_components = [ x for x in command[1].split(" ") if x[0] != "-" ]
                     path_string = " ".join(path_components)
-                    path = self.build_path(path_string)
+                    path = self.build_path(path_string, expect="any")
                     if path == False:
                         continue
                 else:
                     path = self.current_path
 
-                for element in os.listdir(path or "."):
-                    file_path = os.path.join(path, element)
-                    try:
-                        stat = os.stat(file_path)
-                    except:
-                        continue
-                    mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
-                    response.write("%c%c%c%c%c%c%c%c%c%c 1 %s %s %13d %s %3s %s %s\r\n" % (
-                        "d" if os.path.isdir(file_path) else "-",
-                        "r" if stat.st_mode & 00400 else "-",
-                        "w" if stat.st_mode & 00200 else "-",
-                        "x" if stat.st_mode & 00100 else "-",
-                        "r" if stat.st_mode & 00040 else "-",
-                        "w" if stat.st_mode & 00020 else "-",
-                        "x" if stat.st_mode & 00010 else "-",
-                        "r" if stat.st_mode & 00004 else "-",
-                        "w" if stat.st_mode & 00002 else "-",
-                        "x" if stat.st_mode & 00001 else "-",
-                        pwd.getpwuid(stat.st_uid).pw_name,
-                        stat.st_gid,
-                        stat.st_size,
-                        mtime.strftime("%b"),
-                        mtime.strftime("%d"),
-                        mtime.strftime("%H:%I") if mtime.strftime("%Y") == datetime.datetime.today().strftime("%Y") else  mtime.strftime("%Y"),
-                        element))
-                response.seek(0)
-                self.reply_with_file(response)
+                logger.info("[%s] %s %s" % (str(self.client_address), command[0], path))
+
+                if command[0] == "NLST":
+                    response = StringIO.StringIO()
+                    response.write("\r\n".join(os.listdir(path or ".")))
+                    response.seek(0)
+                else:
+                    response = self.generate_directory_listing(path)
+                if command[0] == "STAT":
+                    self.reply("213 Status follows:\r\n%s\r\nEnd of status" % response.buf)
+                else:
+                    self.reply_with_file(response)
+                continue
+            elif command[0] == "SIZE":
+                target = self.build_path(command[1], expect="file")
+                if not target:
+                    continue
+                self.reply("213 %d" % os.stat(target).st_size)
+                continue
             elif command[0] == "PWD":
                 self.reply("257 \"/%s\"" % self.current_path)
+                continue
             elif command[0] == "CWD":
                 new_path = self.build_path(command[1])
                 if new_path == False:
                     continue
                 self.current_path = new_path
                 self.reply("200 \"/%s\"" % self.current_path)
+                continue
             elif command[0] == "RETR":
-                which_file = self.build_path(command[1], True)
+                which_file = self.build_path(command[1], expect="file")
                 if which_file == False:
                     continue
+                logger.info("[%s] RETR %s" % (str(self.client_address), which_file))
                 self.reply_with_file(open(which_file, "r"))
+                continue
             elif command[0] == "CDUP":
                 self.current_path = "/".join(self.current_path.split("/")[:-1])
                 self.reply("200 \"/%s\"" % self.current_path)
+                continue
+            elif command[0] == "REST":
+                self.rest = int(command[1])
+                self.reply("350 Restart position accepted (%d)" % (self.rest, ))
+                continue
+            elif command[0] == "ABOR":
+                self.reply("202 This server only supports abort by closing the socket on your end")
+                continue
+            else:
+                if "write_access" not in self.options or not self.options["write_access"]:
+                    self.reply("502 Command not implemented.")
+                    continue
+
+            # Commands that alter the file system
+            if command[0] in ("STOR", "STOU", "APPE"):
+                target_file = self.build_path(command[1], expect="file", must_exist=False)
+                if not target_file:
+                    continue
+                if command[0] == "STOU" and os.path.exists(target_file):
+                    self.reply("450 Requested file action not taken.")
+                    continue
+                logger.info("[%s] %s %s" % (str(self.client_address), command[0], target_file))
+                try:
+                    target = open(target_file, "w" if command[0] != "APPE" else "a")
+                except:
+                    self.reply("550 Requested action not taken.")
+                    continue
+
+                self.reply_with_file(target, read_from_client=True)
+                continue
+            elif command[0] == "RNFR":
+                target_file = self.build_path(command[1], expect="any")
+                if not target_file:
+                    continue
+                self.rename_target = target_file
+                continue
+            elif command[0] == "RNTO":
+                if not self.rename_target:
+                    self.reply("350 Requested file action pending further information.")
+                    continue
+                target = self.build_path(command[1], expect="file", must_exist=False)
+                if not target:
+                    continue
+                try:
+                    os.rename(self.rename_target, target)
+                    logger.info("[%s] Rename %s -> %s" % (str(self.client_address), self.rename_target, target))
+                    self.reply("250 Requested file action okay, completed.")
+                except:
+                    self.reply("553 Requested action not taken.")
+                self.rename_target = ""
+                continue
+            elif command[0] in ("DELE", "RMD"):
+                target = self.build_path(command[1], expect="file" if command[0] == "DELE" else "dir")
+                if not target:
+                    continue
+                try:
+                    if command[0] == "DELE":
+                        os.unlink(target)
+                    else:
+                        os.rmdir(target)
+                    logger.info("[%s] %s %s" % (str(self.client_address), command[0], target))
+                    self.reply("250 Requested file action okay, completed.")
+                except:
+                    self.reply("553 Requested action not taken.")
+                continue
+            elif command[0] == "MKD":
+                target = self.build_path(command[1], expect="dir", must_exist=False)
+                if not target:
+                    continue
+                try:
+                    os.mkdir(target)
+                    logger.info("[%s] MKDIR %s" % (str(self.client_address), target))
+                    self.reply("257 \"%s\" created." % target)
+                except:
+                    self.reply("553 Requested action not taken.")
+                continue
+            elif command[0] == "SITE":
+                sub = command[1].split(None, 3)
+                if sub[0] == "CHMOD":
+                    mode = int(sub[1].rjust(5, "0"), 8)
+                    target = self.build_path(sub[2], expect="any")
+                    if not target:
+                        return
+                    os.chmod(target, mode)
+                    self.reply("250 Requested file action okay, completed.")
+                else:
+                    self.reply("502 Command not implemented.")
+                continue
             else:
                 self.reply("502 Command not implemented.")
-
-            # USER <SP> <username> <CRLF>
-            # PASS <SP> <password> <CRLF>
-            # ACCT <SP> <account-information> <CRLF>
-            # CWD  <SP> <pathname> <CRLF>
-            # CDUP <CRLF>
-            # SMNT <SP> <pathname> <CRLF>
-            # QUIT <CRLF>
-            # REIN <CRLF>
-            # PORT <SP> <host-port> <CRLF>
-            # PASV <CRLF>
-            # TYPE <SP> <type-code> <CRLF>
-            # STRU <SP> <structure-code> <CRLF>
-            # MODE <SP> <mode-code> <CRLF>
-            # RETR <SP> <pathname> <CRLF>
-            # STOR <SP> <pathname> <CRLF>
-            # STOU <CRLF>
-            # APPE <SP> <pathname> <CRLF>
-            # ALLO <SP> <decimal-integer>
-            #     [<SP> R <SP> <decimal-integer>] <CRLF>
-            # REST <SP> <marker> <CRLF>
-            # RNFR <SP> <pathname> <CRLF>
-            # RNTO <SP> <pathname> <CRLF>
-            # ABOR <CRLF>
-            # DELE <SP> <pathname> <CRLF>
-            # RMD  <SP> <pathname> <CRLF>
-            # MKD  <SP> <pathname> <CRLF>
-            # PWD  <CRLF>
-            # LIST [<SP> <pathname>] <CRLF>
-            # NLST [<SP> <pathname>] <CRLF>
-            # SITE <SP> <string> <CRLF>
-            # SYST <CRLF>
-            # STAT [<SP> <pathname>] <CRLF>
-            # HELP [<SP> <string>] <CRLF>
-            # NOOP <CRLF>
-
-#            Connection Establishment
-#               120
-#                  220
-#               220
-#               421
-#            Login
-#               USER
-#                  230
-#                  530
-#                  500, 501, 421
-#                  331, 332
-#               PASS
-#                  230
-#                  202
-#                  530
-#                  500, 501, 503, 421
-#                  332
-#               ACCT
-#                  230
-#                  202
-#                  530
-#                  500, 501, 503, 421
-#               CWD
-#                  250
-#                  500, 501, 502, 421, 530, 550
-#               CDUP
-#                  200
-#                  500, 501, 502, 421, 530, 550
-#               SMNT
-#                  202, 250
-#                  500, 501, 502, 421, 530, 550
-#            Logout
-#               REIN
-#                  120
-#                     220
-#                  220
-#                  421
-#                  500, 502
-#               QUIT
-#                  221
-#                  500
-#            Transfer parameters
-#               PORT
-#                  200
-#                  500, 501, 421, 530
-#               PASV
-#                  227
-#                  500, 501, 502, 421, 530
-#               MODE
-#                  200
-#                  500, 501, 504, 421, 530
-#               TYPE
-#                  200
-#                  500, 501, 504, 421, 530
-#               STRU
-#                  200
-#                  500, 501, 504, 421, 530
-#            File action commands
-#               ALLO
-#                  200
-#                  202
-#                  500, 501, 504, 421, 530
-#               REST
-#                  500, 501, 502, 421, 530
-#                  350
-#               STOR
-#                  125, 150
-#                     (110)
-#                     226, 250
-#                     425, 426, 451, 551, 552
-#                  532, 450, 452, 553
-#                  500, 501, 421, 530
-#               STOU
-#                  125, 150
-#                     (110)
-#                     226, 250
-#                     425, 426, 451, 551, 552
-#                  532, 450, 452, 553
-#                  500, 501, 421, 530
-#               RETR
-#                  125, 150
-#                     (110)
-#                     226, 250
-#                     425, 426, 451
-#                  450, 550
-#                  500, 501, 421, 530
-#               LIST
-#                  125, 150
-#                     226, 250
-#                     425, 426, 451
-#                  450
-#                  500, 501, 502, 421, 530
-#               NLST
-#                  125, 150
-#                     226, 250
-#                     425, 426, 451
-#                  450
-#                  500, 501, 502, 421, 530
-#               APPE
-#                  125, 150
-#                     (110)
-#                     226, 250
-#                     425, 426, 451, 551, 552
-#                  532, 450, 550, 452, 553
-#                  500, 501, 502, 421, 530
-#               RNFR
-#                  450, 550
-#                  500, 501, 502, 421, 530
-#                  350
-#               RNTO
-#                  250
-#                  532, 553
-#                  500, 501, 502, 503, 421, 530
-#               DELE
-#                  250
-#                  450, 550
-#                  500, 501, 502, 421, 530
-#               RMD
-#                  250
-#                  500, 501, 502, 421, 530, 550
-#               MKD
-#                  257
-#                  500, 501, 502, 421, 530, 550
-#               PWD
-#                  257
-#                  500, 501, 502, 421, 550
-#               ABOR
-#                  225, 226
-#                  500, 501, 502, 421
-#            Informational commands
-#               SYST
-#                  215
-#                  500, 501, 502, 421
-#               STAT
-#                  211, 212, 213
-#                  450
-#                  500, 501, 502, 421, 530
-#               HELP
-#                  211, 214
-#                  500, 501, 502, 421
-#            Miscellaneous commands
-#               SITE
-#                  200
-#                  202
-#                  500, 501, 530
-#               NOOP
-#                  200
-#                  500 421
-
-# TODO FTP server
-# TODO Avahi announcement
-# TODO ngrok support (?!)
+                continue
 
 class HttpHandler(SocketServer.StreamRequestHandler):
-    # TODO CGI support
-    # TODO Webdav support
+    """
+        HTTP server
+
+        Specific options:
+            currently none
+
+        Protocol information:
+            Written from experience, not following the RFC litereally. Supports
+                - Range requests
+                - Chunked encoding
+                - Keep-Alive
+                - Directory listings (with fancy icons!)
+            Support is TODO for
+                - CGI
+                - WEBDAV
+                - Compression
+    """
     timeout = 10
     logger  = logging.getLogger("http")
 
@@ -444,7 +451,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         if not line:
             return False
         self.method, self.path, self.http_version = line.split()
-        if self.http_version.lower() not in "http/1.1":
+        if self.http_version.lower() not in ("http/1.1", "http/1.0"):
             raise RuntimeError("Unknown HTTP version %s" % (self.http_version, ))
         return True
 
@@ -485,12 +492,12 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         if force_close:
             self.headers["connection"] = [ "close" ]
         body = "<!DOCTYPE HTML><title>%s</title><body><h1>%s</h1><pre>%s</pre>" % (error_message, error_message, html_escape(details))
-        connection_mode = self.headers["connection"][0] if "connection" in self.headers else "Keep-Alive"
+        connection_mode = self.headers["connection"][0] if "connection" in self.headers else ("Keep-Alive" if self.http_version == "http/1.1" else "Close")
         self.wfile.write("\r\n".join([
             "%s %s" % (self.http_version, error_message),
             "Content-Length: %d" % len(body),
             "Content-Type: text/html",
-            "Host: %s" % self.headers["host"][0],
+            "Host: %s" % (self.headers["host"][0] if "host" in self.headers else socket.gethostname()),
             "Connection: %s" % connection_mode,
             "",
             ""]))
@@ -552,7 +559,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
         file.seek(start)
 
-        connection_mode = self.headers["connection"][0] if "connection" in self.headers else "Keep-Alive"
+        connection_mode = self.headers["connection"][0] if "connection" in self.headers else ("Keep-Alive" if self.http_version == "http/1.1" else "Close")
         self.wfile.write("\r\n".join([
             "%s %s" % (self.http_version, status),
             "Content-Length: %d" % size,
@@ -617,7 +624,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 except socket.error:
                     pass
                 break
-            if "connection" in self.headers and self.headers["connection"][0].lower() != "keep-alive":
+            if "connection" in self.headers:
+                if self.headers["connection"][0].lower() != "keep-alive":
+                    break
+            elif self.http_version == "http/1.0":
                 break
 
     def finish(self):
@@ -627,9 +637,11 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             pass
 
 def html_escape(string):
+    "Escape special XML/HTML characters"
     return string.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 def fd_copy(source_file, target_file, length):
+    "Copy length bytes from source_file to target_file"
     buffer = 10240
     if length < 0:
         while True:
@@ -648,6 +660,7 @@ def fd_copy(source_file, target_file, length):
             length -= len(data)
 
 def setup_tcp_server(handler_class, base_port=1234, options={}):
+    "Setup a SocketServer on a variable path. Returns the instance and the actual port as a tuple."
     counter = 0
     while True:
         try:
@@ -661,6 +674,7 @@ def setup_tcp_server(handler_class, base_port=1234, options={}):
     return server, base_port + counter
 
 def setup_tcp_server_socket(base_port=1234):
+    "Setup a TCP socket on a variable path. Returns the instance and the actual port as a tuple."
     counter = 0
     while True:
         try:
@@ -675,6 +689,8 @@ def setup_tcp_server_socket(base_port=1234):
     return server, base_port + counter
 
 def wait_for_signal(servers):
+    """Infinite loop that intercepts <C-c>, closes the servers if it catches it
+    once and kills the process the second time."""
     signal_count = [ 0 ]
     def _signal_handler(signum, frame):
         signal_count[0] += 1
@@ -696,15 +712,28 @@ def wait_for_signal(servers):
     signal.signal(signal.SIGINT, oldint)
     signal.signal(signal.SIGHUP, oldhup)
 
+def create_avahi_group(service, port):
+    """Register a server with the local Avahi daemon. `service' must be one of http, ftp, ..
+    Returns the entry group instance from the DBus. Call Reset() on it to unregister the group."""
+    if not has_dbus:
+        return False
+    bus = dbus.SystemBus()
+    dbserver = dbus.Interface(bus.get_object(DBUS_NAME, DBUS_PATH_SERVER), DBUS_INTERFACE_SERVER)
+    group = dbus.Interface(bus.get_object(DBUS_NAME, dbserver.EntryGroupNew()), DBUS_INTERFACE_ENTRY_GROUP)
+    group.AddService(IF_UNSPEC, PROTO_UNSPEC, dbus.UInt32(0), "megad on " + socket.gethostname(), "_%s._tcp" % service, "", "", dbus.UInt16(port), "")
+    group.Commit()
+    # group.Reset()
+    return group
 
 
+# TODO Write getopt() interface and make everything configurable
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("main")
 
 servers = []
 
-options = {}
+options = { "write_access": True }
 
 server, port = setup_tcp_server(HttpHandler, 1234, options)
 servers.append(server)
@@ -712,6 +741,6 @@ logger.info("HTTP server started on port %d", port)
 
 server, port = setup_tcp_server(FtpHandler, 1235, options)
 servers.append(server)
-logger.info("HTTP server started on port %d", port)
+logger.info("FTP server started on port %d", port)
 
 wait_for_signal(servers)
