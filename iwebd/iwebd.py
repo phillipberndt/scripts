@@ -674,7 +674,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 self.send_error("416 Range Not Satisfiable")
                 return
             status = "206 Partial Content"
-            headers["Content-Range"] = "bytes %d-%d/%d\r\n" % (range_start, range_end, size)
+            headers["Content-Range"] = "bytes %d-%d/%d" % (range_start, range_end, size)
             start = range_start
             size = range_end - range_start + 1
 
@@ -808,7 +808,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         if "host" not in self.headers:
             self.headers["host"] = [ socket.gethostname() ]
 
-        if "user" in self.options:
+        if "user" in self.options and self.options["user"]:
             # Authenticate the user
             authentication_ok = False
             if "authorization" in self.headers:
@@ -1005,7 +1005,7 @@ def main():
     user = False
     password = False
     try:
-        (options, arguments) = getopt.getopt(sys.argv[1:], "fhdwdcap:")
+        (options, arguments) = getopt.getopt(sys.argv[1:], "fhdwdcvap:")
         if arguments:
             port = int(arguments[0])
         if len(arguments) > 1:
