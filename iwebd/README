@@ -1,0 +1,32 @@
+iwebd - Instant web daemons
+
+The idea of this project is to provide people with network daemons for development
+purposes and ad-hoc use. If you need an httpd, simply run
+ iwebd -h <port>
+and you'll have one.
+
+All code in this directory is licensed under the GNU GENERAL PUBLIC LICENSE, Version 3
+Available at http://www.gnu.org/licenses/gpl-3.0.html
+If you don't agree to those terms and/or can't obtain a copy of the license you
+may not use or redistribute this program.
+
+iwebd's features include
+
+ * FTP
+   * Mostly RFC compliant
+   * Only `ls -l' style LISTings
+   * Binary mode only
+ * httpd
+   * Authentication
+   * webdav (with write access)
+   * CGI
+   * Range'd requests
+   * Fancy directory listings with icons if you have pyGTK
+ * Avahi announcement of both in the local network
+ * Multi-threaded
+
+Superseded, but available in the repository's history are:
+
+ * ihttpd  (select() bases httpd with all of the above, minus webdav, plus mod_rewrite support)
+ * iftpd   (as above)
+ * cihttpd (a C implementation of the instant httpd, but has never had much testing)
