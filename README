@@ -81,6 +81,11 @@ Contents:
   runs lighttpd, in the same fashion as my ihttpd: Serving from ./, with
   support for PHP.
 
+* iwebd
+
+  Monolithic instantaneous httpd and ftpd with support for everything you'd ever
+  need to quickly move a from b to c. Including webdav.
+
 * nonroot_apt
 
   1) A script for Debian based systems which allows non-root users to install
