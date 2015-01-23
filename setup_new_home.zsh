@@ -38,7 +38,7 @@ fi
 # Link binaries
 [ -d bin ] || mkdir bin
 cd bin
-for BINARY in gdo/gdo nonroot_apt/nonroot_apt.py passwrd/passwrd.py runGraphical/runGraphical.py todo/todo unpack/unpack venv/venv/venv.py pydoce/pydoce; do
+for BINARY in gdo/gdo nonroot_apt/nonroot_apt.py passwrd/passwrd.py runGraphical/runGraphical.py todo/todo unpack/unpack venv/venv/venv.py pydoce/pydoce iwebd/iwebd.py; do
 	ln -s ../_scripts/$BINARY ${BINARY:t:r}
 done
 cd ..
