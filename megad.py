@@ -536,17 +536,19 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     def handle_request_for_file(self):
         if os.path.isdir(self.mapped_path):
             mime_type = "text/html"
-            data = [ "<!DOCTYPE HTML><title>Directory contents for %(path)s</title><body><h1>Directory contents for %(path)s</h1><ul>" % { "path": xml_escape(self.path) } ]
+            data = [ "<!DOCTYPE HTML><title>Directory contents for %(path)s</title><style type='text/css'>ul, li { list-style-type: none; }</style><body><h1>Directory contents for %(path)s</h1><ul>" % { "path": xml_escape(self.path) } ]
             base = self.path + ("/" if self.path[-1] != "/" else "")
-            data.append("<li><a href='%s'>..</a></li>" % xml_escape(os.path.join(base, "..")))
 
             dirs = []
             files = []
 
-            for name in os.listdir(self.mapped_path):
+            for name in itertools.chain([".."], os.listdir(self.mapped_path)):
                 absname = os.path.join(self.mapped_path, name)
                 if os.path.isdir(absname):
-                    dirs.append("<li><a href='%s'>%s/</a></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
+                    if has_gtk:
+                        dirs.append("<li><img src='/.directory-icons/inode-directory'> <a href='%s'>%s/</a></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
+                    else:
+                        dirs.append("<li><a href='%s'>%s/</a></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
                 else:
                     file_mime_type = mimetypes.guess_type(absname)[0] or "application/octet-stream"
                     if has_gtk and gtk.icon_theme_get_default().has_icon(file_mime_type.replace("/", "-")):
@@ -874,6 +876,7 @@ def show_help():
 def main():
     port = 1234
     user = False
+    password = False
     try:
         (options, arguments) = getopt.getopt(sys.argv[1:], "fhdwdap:")
         if arguments:
