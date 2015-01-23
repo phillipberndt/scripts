@@ -7,6 +7,7 @@
 import SocketServer
 import StringIO
 import atexit
+import base64
 import datetime
 import getopt
 import grp
@@ -19,6 +20,7 @@ import re
 import shutil
 import signal
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -59,6 +61,7 @@ Syntax: megad -<f,h> [other options] [port]
 
 Options:
     -a                  Announce services via Avahi
+    -c                  Allow CGI in httpd
     -d                  Allow webdav access in httpd
     -f                  Run ftpd
     -h                  Run httpd
@@ -454,15 +457,14 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 - Keep-Alive
                 - Directory listings (with fancy icons!)
             Support is TODO for
-                - CGI
                 - Compression
-                - Digest and Basic authentication
     """
     timeout = 10
     logger  = logging.getLogger("http")
 
     def __init__(self, request, client_address, server, options={}):
         self.headers = {}
+        self.http_version = "HTTP/1.1"
         self.options = options
         self.body_read = False
         SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
@@ -472,6 +474,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         self.processing_started = time.time()
 
     def read_http_method(self):
+        "Read the first line of an HTTP request"
         line = self.rfile.readline()
         if not line:
             return False
@@ -481,6 +484,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         return True
 
     def read_http_headers(self):
+        r"Read all HTTP headers until \r\n"
         previous_header = None
         while True:
             line = self.rfile.readline()
@@ -496,6 +500,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self.headers[previous_header].append(value.strip())
 
     def read_http_body(self, target_file=None):
+        "Read the body of a request. Safe to call twice, as this function memorizes whether the body has been read."
         if self.body_read:
             return
         if "expect" in self.headers and "100-continue" in self.headers["expect"]:
@@ -515,6 +520,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         self.body_read = True
 
     def send_header(self, status, headers):
+        "Send the headers of a reply."
         self.logger.info("[%s] %s %s %s" % (self.client_address, status.split()[0], self.method, self.path))
         if "Host" not in headers:
             headers["Host"] = self.headers["host"][0] if "host" in self.headers else socket.gethostbyname()
@@ -524,19 +530,99 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             "%s: %s" % (name, value) for name, value in headers.items()
         ])))
 
-    def send_error(self, error_message, force_close=False, details=""):
+    def send_error(self, error_message, force_close=False, details="", headers={}):
+        "Reply with an error message. After calling this, you can safely return from any handler."
         if ("content-length" in self.headers or "transfer-encoding" in self.headers) and not ("expect" in self.headers and "100-continue" in self.headers["expect"]):
             force_close = True
         if force_close:
             self.headers["connection"] = [ "close" ]
         body = "<!DOCTYPE HTML><title>%s</title><body><h1>%s</h1><pre>%s</pre>" % (error_message, error_message, xml_escape(details))
-        self.send_header(error_message, { "Content-Length": len(body), "Content-Type": "text/html" })
+        headers.update({ "Content-Length": len(body), "Content-Type": "text/html" })
+        self.send_header(error_message, headers)
         self.wfile.write(body)
 
+    def handle_request_for_cgi(self):
+        "Like handle_request_for_file, but run the target file as a CGI script"
+        file_extension = os.path.splitext(self.mapped_path)[-1][1:]
+        if file_extension in self.options["cgi_handlers"]:
+            execute = [ self.options["cgi_handlers"][file_extension], self.mapped_path ]
+        else:
+            execute = [ self.mapped_path ]
+
+        environ = os.environ.copy()
+        environ.update({
+                "SERVER_SOFTWARE": "ihttpd",
+                "SERVER_NAME": self.headers["host"][0] if "host" in self.headers else socket.gethostname(),
+                "GATEWAY_INTERFACE": "CGI/1.1",
+                "SERVER_PROTOCOL": self.http_version,
+                "SERVER_PORT": str(self.request.getsockname()[1]),
+                "REQUEST_METHOD": self.method,
+                "QUERY_STRING": urlparse.urlparse(self.path).query,
+                "SCRIPT_NAME": self.mapped_path,
+                "PATH_INFO": self.mapped_path,
+                "REQUEST_URI": self.path,
+                "PATH_TRANSLATED": os.path.abspath(self.mapped_path),
+                "REMOTE_ADDR": self.request.getpeername()[0],
+                "CONTENT_TYPE": self.headers["content-type"][0] if "content-type" in self.headers else "",
+                "CONTENT_LENGTH": str(self.headers["content-length"][0]) if "content-length" in self.headers else "0"
+        })
+        for header in self.headers:
+            environ["HTTP_%s" % header.upper().replace("-", "_")] = ", ".join(self.headers[header])
+
+        cgi_process = subprocess.Popen(execute, stdin=subprocess.PIPE, stdout=subprocess.PIPE, close_fds=True, env=environ)
+
+        def _read_body_to_cgi():
+            try:
+                self.read_http_body(cgi_process.stdin)
+                cgi_process.stdin.close()
+            except:
+                self.send_error("500 Internal server error", True)
+        threading.Thread(target=_read_body_to_cgi).start()
+
+        cgi_headers = {}
+        last_header = None
+        while True:
+            cgi_header = cgi_process.stdout.readline()
+            if not cgi_header:
+                self.send_error("500 Internal server error", True)
+                cgi_process.terminate()
+                return
+            cgi_header = cgi_header[:-1]
+            if cgi_header and cgi_header[-1] == "\r":
+                cgi_header = cgi_header[:-1]
+            if not cgi_header:
+                break
+            if cgi_header[0].isspace():
+                cgi_headers[last_header].append(cgi_header.strip())
+            else:
+                last_header, value = cgi_header.split(":", 1)
+                last_header = last_header.lower()
+                cgi_headers[last_header] = [ value.strip() ]
+
+        status = "200 Ok" if "status" not in cgi_headers else cgi_headers["status"][0]
+        headers = { ucparts(key): ", ".join(value) for key, value in cgi_headers.items() if key != "status" }
+        if "Content-Type" not in headers:
+            headers["Content-Type"] = "text/html"
+
+        if "content-length" in cgi_headers:
+            self.send_header(status, headers)
+            fd_copy(cgi_process.stdout, self.wfile, int(cgi_headers["content-length"]))
+        else:
+            headers["Transfer-Encoding"] = "chunked"
+            self.send_header(status, headers)
+            while True:
+                data = os.read(cgi_process.stdout.fileno(), 10240)
+                if not data:
+                    break
+                self.wfile.write("%x\r\n%s\r\n" % (len(data), data))
+            self.wfile.write("0\r\n\r\n")
+        cgi_process.terminate()
+
     def handle_request_for_file(self):
+        "Handle a request for a file, simple GET/HEAD/POST case."
         if os.path.isdir(self.mapped_path):
             mime_type = "text/html"
-            data = [ "<!DOCTYPE HTML><title>Directory contents for %(path)s</title><style type='text/css'>ul, li { list-style-type: none; }</style><body><h1>Directory contents for %(path)s</h1><ul>" % { "path": xml_escape(self.path) } ]
+            data = [ "<!DOCTYPE HTML><title>Directory contents for %(path)s</title><style type='text/css'>ul, li { list-style-type: none; }</style><body><h1>Directory contents for %(path)s</h1><ul>" % { "path": xml_escape(urldecode(self.path)) } ]
             base = self.path + ("/" if self.path[-1] != "/" else "")
 
             dirs = []
@@ -563,15 +649,20 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             size = len(data)
             file = StringIO.StringIO(data)
         else:
+            if "allow_cgi" in self.options and self.options["allow_cgi"] and (os.path.splitext(self.mapped_path)[-1][1:] in self.options["cgi_handlers"] or os.access(self.mapped_path, os.X_OK)):
+                self.handle_request_for_cgi()
+                return
             mime_type = mimetypes.guess_type(self.mapped_path)[0]
             stat = os.stat(self.mapped_path)
             size = stat.st_size
             file = open(self.mapped_path, "rb")
 
         status = "200 Ok"
+        self.read_http_body()
         self.reply_with_file_like_object(file, size, mime_type, status)
 
     def reply_with_file_like_object(self, file, size, mime_type, status):
+        "Reply to a request with a file object"
         start = 0
         headers = {}
         if "range" in self.headers:
@@ -598,6 +689,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         file.close()
 
     def handle_dav_request(self):
+        "Handle webdav specific methods."
         method = self.method.upper()
         if method == "OPTIONS":
             self.read_http_body()
@@ -696,8 +788,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self.send_error("405 Method not allowed")
 
     def map_url(self, url_arg):
+        "Map an URL (or path of an URL) to a local file"
         url = urlparse.urlparse(url_arg)
-        path = re.sub("^/+", "", re.sub("%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1)), 16), url.path))
+        path = re.sub("^/+", "", urldecode(url.path))
         cwd = os.path.abspath(".")
         mapped_path = os.path.join(cwd, path)
         if mapped_path[:len(cwd)] != cwd:
@@ -705,6 +798,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         return mapped_path
 
     def handle_request(self):
+        "Handle a single request."
         self.body_read = False
         if not self.read_http_method():
             self.rfile.close()
@@ -713,6 +807,19 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         self.read_http_headers()
         if "host" not in self.headers:
             self.headers["host"] = [ socket.gethostname() ]
+
+        if "user" in self.options:
+            # Authenticate the user
+            authentication_ok = False
+            if "authorization" in self.headers:
+                method, param = self.headers["authorization"][0].split()
+                if method.lower() == "basic":
+                    user, password = base64.b64decode(param).split(":", 1)
+                    if user == self.options["user"] and password == self.options["pass"]:
+                        authentication_ok = True
+            if not authentication_ok:
+                self.send_error("401 Not Authorized", headers={ "WWW-Authenticate": "Basic realm=\"megad webserver\"" })
+                return
 
         if self.path.startswith("/.directory-icons/") and has_gtk:
             output = StringIO.StringIO()
@@ -741,7 +848,6 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self.read_http_body()
             return
 
-        self.read_http_body()
         if self.method.lower() not in ("get", "post"):
             self.send_error("405 Method not allowed")
         self.handle_request_for_file()
@@ -763,7 +869,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             if "connection" in self.headers:
                 if self.headers["connection"][0].lower() != "keep-alive":
                     break
-            elif self.http_version.lower() == "http/1.0":
+            elif not self.http_version or self.http_version.lower() == "http/1.0":
                 break
 
     def finish(self):
@@ -873,12 +979,33 @@ def show_help():
     print HELP_TEXT
     sys.exit(0)
 
+def determine_available_cgi_handlers():
+    "Return a dictionary of file extensions mapping to available CGI handlers"
+    guess = {
+        "php": "/usr/bin/php-cgi",
+        "pl": "/usr/bin/perl",
+        "sh": "/bin/sh",
+        "py": "/usr/bin/python",
+    }
+    for key, value in list(guess.items()):
+        if not os.path.exists(value):
+            del guess[key]
+    return guess
+
+def ucparts(string):
+    "Replace foo-bar-baz with Foo-Bar-Baz"
+    return "-".join([ "%c%s" % (x[0].upper(), x[1:].lower()) if x else "" for x in string.split("-") ])
+
+def urldecode(string):
+    "Replace %xx escape sequences by their byte values"
+    return re.sub("%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1), 16)), string)
+
 def main():
     port = 1234
     user = False
     password = False
     try:
-        (options, arguments) = getopt.getopt(sys.argv[1:], "fhdwdap:")
+        (options, arguments) = getopt.getopt(sys.argv[1:], "fhdwdcap:")
         if arguments:
             port = int(arguments[0])
         if len(arguments) > 1:
@@ -894,11 +1021,15 @@ def main():
     logging.basicConfig(level=logging.DEBUG if "-v" in options else logging.INFO)
     logger = logging.getLogger("main")
 
+    cgi_handlers = determine_available_cgi_handlers()
+
     server_options = {
         "write_access": "-w" in options,
         "dav_enabled": "-d" in options,
         "user": user,
         "pass": password,
+        "allow_cgi": "-c" in options,
+        "cgi_handlers": cgi_handlers,
     }
 
     servers = []
