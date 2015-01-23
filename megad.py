@@ -6,6 +6,7 @@
 #
 import SocketServer
 import StringIO
+import atexit
 import datetime
 import getopt
 import grp
@@ -14,6 +15,7 @@ import logging
 import mimetypes
 import os
 import pwd
+import re
 import shutil
 import signal
 import socket
@@ -21,10 +23,12 @@ import sys
 import threading
 import time
 import traceback
+import urlparse
 
 from wsgiref.handlers import format_date_time
 
 # TODO ngrok support (?!)
+# TODO ssl
 
 try:
     import gtk
@@ -47,6 +51,22 @@ except ImportError:
     DBUS_INTERFACE_ENTRY_GROUP = "org.freedesktop.Avahi.EntryGroup"
     PROTO_UNSPEC = -1
     IF_UNSPEC = -1
+
+HELP_TEXT = """megad
+Copyright (c) 2015, Phillip Berndt
+
+Syntax: megad -<f,h> [other options] [port]
+
+Options:
+    -a                  Announce services via Avahi
+    -d                  Allow webdav access in httpd
+    -f                  Run ftpd
+    -h                  Run httpd
+    -p "user:password"  Only allow authenticated access
+    -v                  Be more verbose
+    -w                  Allow write access
+
+"""
 
 class ReusableServer(SocketServer.ThreadingTCPServer):
     allow_reuse_address = True
@@ -108,7 +128,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 self.data_mode["socket"].connect((self.data_mode["ip"], self.data_mode["port"]))
             else:
                 data_socket, remote = self.data_mode["server_socket"].accept()
-                logger.debug("Data connection from %s for %s accepted" % (remote, self.client_address))
+                self.logger.debug("Data connection from %s for %s accepted" % (remote, self.client_address))
                 self.data_mode["socket"] = data_socket
 
     def disconnect_data_socket(self):
@@ -204,26 +224,26 @@ class FtpHandler(SocketServer.StreamRequestHandler):
         return response
 
     def handle(self):
-        logger.debug("Incoming FTP connection from %s" % (str(self.client_address), ))
+        self.logger.debug("Incoming FTP connection from %s" % (str(self.client_address), ))
         self.reply("220 Service ready for new user.")
         while True:
             command = self.rfile.readline().strip()
             if not command:
                 break
-            logger.debug("[%s] Raw command: `%s'" % (self.client_address, command))
+            self.logger.debug("[%s] Raw command: `%s'" % (self.client_address, command))
             command = command.split(None, 1)
 
             # Authentication and unauthenticated commands
             if command[0] == "USER":
-                if "user" in options and command[1] != options["user"]:
+                if "user" in self.options and command[1] != self.options["user"]:
                     self.reply("430 Invalid username or password")
-                elif "pass" in options:
+                elif "pass" in self.options:
                     self.reply("331 User name okay, need password.")
                     self.user = command[1]
                 else:
                     self.reply("230 User logged in, proceed.")
                     self.user = command[1]
-                    logger.info("[%s] %s logged in." % (self.client_address, self.user))
+                    self.logger.info("[%s] %s logged in." % (self.client_address, self.user))
                     self.is_authenticated = True
                 continue
             elif command[0] == "PASS" and self.user:
@@ -231,7 +251,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                     self.reply("430 Invalid username or password")
                 else:
                     self.reply("230 User logged in, proceed.")
-                    logger.info("[%s] %s logged in." % (self.client_address, self.user))
+                    self.logger.info("[%s] %s logged in." % (self.client_address, self.user))
                     self.is_authenticated = True
                 continue
             elif command[0] in ("NOOP", "ALLO"):
@@ -289,7 +309,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 else:
                     path = self.current_path
 
-                logger.info("[%s] %s %s" % (str(self.client_address), command[0], path))
+                self.logger.info("[%s] %s %s" % (str(self.client_address), command[0], path))
 
                 if command[0] == "NLST":
                     response = StringIO.StringIO()
@@ -322,7 +342,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 which_file = self.build_path(command[1], expect="file")
                 if which_file == False:
                     continue
-                logger.info("[%s] RETR %s" % (str(self.client_address), which_file))
+                self.logger.info("[%s] RETR %s" % (str(self.client_address), which_file))
                 self.reply_with_file(open(which_file, "r"))
                 continue
             elif command[0] == "CDUP":
@@ -349,7 +369,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 if command[0] == "STOU" and os.path.exists(target_file):
                     self.reply("450 Requested file action not taken.")
                     continue
-                logger.info("[%s] %s %s" % (str(self.client_address), command[0], target_file))
+                self.logger.info("[%s] %s %s" % (str(self.client_address), command[0], target_file))
                 try:
                     target = open(target_file, "w" if command[0] != "APPE" else "a")
                 except:
@@ -373,7 +393,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                     continue
                 try:
                     os.rename(self.rename_target, target)
-                    logger.info("[%s] Rename %s -> %s" % (str(self.client_address), self.rename_target, target))
+                    self.logger.info("[%s] Rename %s -> %s" % (str(self.client_address), self.rename_target, target))
                     self.reply("250 Requested file action okay, completed.")
                 except:
                     self.reply("553 Requested action not taken.")
@@ -388,7 +408,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                         os.unlink(target)
                     else:
                         os.rmdir(target)
-                    logger.info("[%s] %s %s" % (str(self.client_address), command[0], target))
+                    self.logger.info("[%s] %s %s" % (str(self.client_address), command[0], target))
                     self.reply("250 Requested file action okay, completed.")
                 except:
                     self.reply("553 Requested action not taken.")
@@ -399,7 +419,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                     continue
                 try:
                     os.mkdir(target)
-                    logger.info("[%s] MKDIR %s" % (str(self.client_address), target))
+                    self.logger.info("[%s] MKDIR %s" % (str(self.client_address), target))
                     self.reply("257 \"%s\" created." % target)
                 except:
                     self.reply("553 Requested action not taken.")
@@ -435,8 +455,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 - Directory listings (with fancy icons!)
             Support is TODO for
                 - CGI
-                - WEBDAV
                 - Compression
+                - Digest and Basic authentication
     """
     timeout = 10
     logger  = logging.getLogger("http")
@@ -444,6 +464,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     def __init__(self, request, client_address, server, options={}):
         self.headers = {}
         self.options = options
+        self.body_read = False
         SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
 
     def setup(self):
@@ -475,6 +496,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self.headers[previous_header].append(value.strip())
 
     def read_http_body(self, target_file=None):
+        if self.body_read:
+            return
         if "expect" in self.headers and "100-continue" in self.headers["expect"]:
             self.wfile.write("%s 100 Continue\r\n\r\n" % self.http_version)
         if "content-length" in self.headers:
@@ -489,8 +512,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     break
                 fd_copy(self.rfile, target_file, chunk_size)
             self.read_http_headers()
+        self.body_read = True
 
     def send_header(self, status, headers):
+        self.logger.info("[%s] %s %s %s" % (self.client_address, status.split()[0], self.method, self.path))
         if "Host" not in headers:
             headers["Host"] = self.headers["host"][0] if "host" in self.headers else socket.gethostbyname()
         if "Connection" not in headers:
@@ -545,7 +570,6 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         self.reply_with_file_like_object(file, size, mime_type, status)
 
     def reply_with_file_like_object(self, file, size, mime_type, status):
-        range_header = ""
         start = 0
         headers = {}
         if "range" in self.headers:
@@ -593,13 +617,21 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     collection = itertools.chain([""], os.listdir(self.mapped_path))
                 for file_name in collection:
                     file_path = os.path.join(self.mapped_path, file_name)
+                    try:
+                        stat = os.stat(file_path)
+                    except:
+                        continue
                     if os.path.isdir(file_path):
                         res_type = "<D:resourcetype><D:collection/></D:resourcetype>"
                     else:
-                        res_type = "<D:resourcetype/><D:getcontentlength>%d</D:getcontentlength>" % (os.stat(file_path).st_size, )
+                        res_type = "<D:resourcetype/><D:getcontentlength>%d</D:getcontentlength>" % (stat.st_size, )
                     response.write("<D:response><D:href>%s%s%s</D:href><D:propstat><D:prop>%s</D:prop><D:status>HTTP/1.1 200 Ok</D:status></D:propstat></D:response>\r\n" % (self.path, "/" if self.path[-1] != "/" else "", file_name, res_type))
             else:
-                stat = os.stat(self.mapped_path)
+                try:
+                    stat = os.stat(self.mapped_path)
+                except:
+                    self.send_error("404 Not found")
+                    return
                 response.write(("<D:response><D:href>%s</D:href><D:propstat><D:prop>"
                                 "<D:resourcetype/><D:getcontentlength>%d</D:getcontentlength>"
                                 "<D:creationdate>%s</D:creationdate><D:getlastmodified>%s</D:getlastmodified><D:getcontenttype>%s</D:getcontenttype>"
@@ -625,29 +657,53 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 self.send_header("201 Created", { "Content-Length": 0 })
             except:
                 self.send_error("403 Access denied")
-            # as above, mkdir
         elif method == "MOVE":
-            # TODO Parse URI, issue rename
-            print self.headers["destination"]
-            self.send_error("405 Method not allowed")
-            pass
-            # "Destination" header marks target URL, 200 Ok
-        elif method == "COPY":
-            # TODO Parse URI, issue copy shutil.copytree
-            self.send_error("405 Method not allowed")
-            # As "Move"
-        elif method == "DELETE":
+            target = self.map_url(self.headers["destination"][0])
+            if not target:
+                self.send_error("400 Malformed request, destination missing")
+                return
             try:
-                shutil.rmtree(self.mapped_path)
+                self.read_http_body()
+                os.rename(self.mapped_path, target)
                 self.send_header("200 Ok", { "Content-Length": 0 })
             except:
                 self.send_error("403 Access denied")
-            # Parameter bight be anything! 200 Ok
+
+            pass
+        elif method == "COPY":
+            target = self.map_url(self.headers["destination"][0])
+            if not target:
+                self.send_error("400 Malformed request, destination missing")
+                return
+            try:
+                shutil.copytree(self.mapped_path, target)
+                self.send_header("200 Ok", { "Content-Length": 0 })
+            except:
+                self.send_error("403 Access denied")
+        elif method == "DELETE":
+            try:
+                if os.path.isdir(self.mapped_path):
+                    shutil.rmtree(self.mapped_path)
+                else:
+                    os.unlink(self.mapped_path)
+                self.send_header("200 Ok", { "Content-Length": 0 })
+            except:
+                self.send_error("403 Access denied")
             pass
         else:
             self.send_error("405 Method not allowed")
 
+    def map_url(self, url_arg):
+        url = urlparse.urlparse(url_arg)
+        path = re.sub("^/+", "", re.sub("%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1)), 16), url.path))
+        cwd = os.path.abspath(".")
+        mapped_path = os.path.join(cwd, path)
+        if mapped_path[:len(cwd)] != cwd:
+            return False
+        return mapped_path
+
     def handle_request(self):
+        self.body_read = False
         if not self.read_http_method():
             self.rfile.close()
             return
@@ -665,12 +721,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self.reply_with_file_like_object(output, output.pos, "image/png", "200 Ok")
             return
 
-        cwd = os.path.abspath(".")
-        self.mapped_path = os.path.join(cwd, self.path[1:])
-        if "?" in self.mapped_path:
-            self.mapped_path = self.mapped_path.split("?")[0]
-
-        if self.mapped_path[:len(cwd)] != cwd:
+        self.mapped_path = self.map_url(self.path[1:])
+        if not self.mapped_path:
             self.send_error("403 Access denied")
             return
 
@@ -679,14 +731,12 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             return
 
         if not os.path.exists(self.mapped_path):
-            logging.warn("[%s] 404 %s" % (self.client_address, self.path))
             self.send_error("404 Not found")
             return
 
-        logging.info("[%s] %s" % (self.client_address, self.path))
-
         if "dav_enabled" in self.options and self.options["dav_enabled"] and self.method.upper() in ("OPTIONS", "PROPFIND", "MOVE", "COPY"):
             self.handle_dav_request()
+            self.read_http_body()
             return
 
         self.read_http_body()
@@ -796,39 +846,78 @@ def wait_for_signal(servers):
     signal.signal(signal.SIGINT, oldint)
     signal.signal(signal.SIGHUP, oldhup)
 
-def create_avahi_group(service, port):
-    """Register a server with the local Avahi daemon. `service' must be one of http, ftp, ..
-    Returns the entry group instance from the DBus. Call Reset() on it to unregister the group."""
+def create_avahi_group(service, port, text=[]):
+    """Register a server with the local Avahi daemon. `service' must be one of
+    webdav, http, ftp, ..  Returns the entry group instance from the DBus. Call
+    Reset() on it to unregister the group. Will register the instance with atexit
+    to make sure it is unregistered."""
     if not has_dbus:
         return False
     bus = dbus.SystemBus()
     dbserver = dbus.Interface(bus.get_object(DBUS_NAME, DBUS_PATH_SERVER), DBUS_INTERFACE_SERVER)
     group = dbus.Interface(bus.get_object(DBUS_NAME, dbserver.EntryGroupNew()), DBUS_INTERFACE_ENTRY_GROUP)
-    group.AddService(IF_UNSPEC, PROTO_UNSPEC, dbus.UInt32(0), "megad on " + socket.gethostname(), "_%s._tcp" % service, "", "", dbus.UInt16(port), "")
+    group.AddService(IF_UNSPEC, PROTO_UNSPEC, dbus.UInt32(0), "megad on " + socket.gethostname(), "_%s._tcp" % service, "", "", dbus.UInt16(port), dbus.Array(text))
     group.Commit()
-    # group.Reset()
+
+    atexit.register(group.Reset)
     return group
 
 def iso_time(timestamp):
     "Return an ISO 8601 formatted timestamp."
     return time.strftime("%Y-%m-%dT%H:%M:%S.0Z", time.localtime(timestamp))
 
+def show_help():
+    "Show help text and exit"
+    print HELP_TEXT
+    sys.exit(0)
 
-# TODO Write getopt() interface and make everything configurable
+def main():
+    port = 1234
+    user = False
+    try:
+        (options, arguments) = getopt.getopt(sys.argv[1:], "fhdwdap:")
+        if arguments:
+            port = int(arguments[0])
+        if len(arguments) > 1:
+            raise ValueError()
+        options = dict(options)
+        if "-f" not in options and "-h" not in options:
+            raise ValueError()
+        if "-p" in options:
+            user, password = options["-p"].split(":")
+    except:
+        show_help()
 
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger("main")
+    logging.basicConfig(level=logging.DEBUG if "-v" in options else logging.INFO)
+    logger = logging.getLogger("main")
 
-servers = []
+    server_options = {
+        "write_access": "-w" in options,
+        "dav_enabled": "-d" in options,
+        "user": user,
+        "pass": password,
+    }
 
-options = { "write_access": True, "dav_enabled": True }
+    servers = []
 
-server, port = setup_tcp_server(HttpHandler, 1234, options)
-servers.append(server)
-logger.info("HTTP server started on port %d", port)
+    if "-h" in options:
+        server, httpd_port = setup_tcp_server(HttpHandler, port, server_options)
+        servers.append(server)
+        logger.info("HTTP server started on port %d", httpd_port)
+        if "-a" in options:
+            create_avahi_group("http", httpd_port)
+            if "-d" in options:
+                user = user or "anonymous"
+                create_avahi_group("webdav", httpd_port, [ "u=%s" % user, "path=/" ])
 
-server, port = setup_tcp_server(FtpHandler, 1235, options)
-servers.append(server)
-logger.info("FTP server started on port %d", port)
+    if "-f" in options:
+        server, ftpd_port = setup_tcp_server(FtpHandler, port, server_options)
+        servers.append(server)
+        logger.info("FTP server started on port %d", ftpd_port)
+        create_avahi_group("ftp", ftpd_port)
 
-wait_for_signal(servers)
+    wait_for_signal(servers)
+
+if __name__ == '__main__':
+    main()
+
