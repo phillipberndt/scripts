@@ -113,6 +113,12 @@ class FtpHandler(SocketServer.StreamRequestHandler):
         self.options = options
         SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
 
+    def log(self, lvl, msg, *args, **kwargs):
+        kwargs.update({
+            "ip": self.client_address[0],
+        })
+        self.logger.log(lvl, msg, kwargs)
+
     def reply(self, line):
         "Reply a status message in the `nnn Text' format. Multi-line messages are dealt with automatically."
         if "\r\n" in line:
@@ -131,7 +137,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 self.data_mode["socket"].connect((self.data_mode["ip"], self.data_mode["port"]))
             else:
                 data_socket, remote = self.data_mode["server_socket"].accept()
-                self.logger.debug("Data connection from %s for %s accepted" % (remote, self.client_address))
+                self.log(logging.DEBUG, "Data connection for %(target)s", target=self.client_address)
                 self.data_mode["socket"] = data_socket
 
     def disconnect_data_socket(self):
@@ -227,26 +233,26 @@ class FtpHandler(SocketServer.StreamRequestHandler):
         return response
 
     def handle(self):
-        self.logger.debug("Incoming FTP connection from %s" % (str(self.client_address), ))
+        self.log(logging.DEBUG, "Incoming FTP connection")
         self.reply("220 Service ready for new user.")
         while True:
             command = self.rfile.readline().strip()
             if not command:
                 break
-            self.logger.debug("[%s] Raw command: `%s'" % (self.client_address, command))
+            self.log(logging.DEBUG, "Raw command: `%(command)s'", {"command": command })
             command = command.split(None, 1)
 
             # Authentication and unauthenticated commands
             if command[0] == "USER":
-                if "user" in self.options and command[1] != self.options["user"]:
+                if "user" in self.options and self.options["user"] and command[1] != self.options["user"]:
                     self.reply("430 Invalid username or password")
-                elif "pass" in self.options:
+                elif "pass" in self.options and self.options["pass"]:
                     self.reply("331 User name okay, need password.")
                     self.user = command[1]
                 else:
                     self.reply("230 User logged in, proceed.")
                     self.user = command[1]
-                    self.logger.info("[%s] %s logged in." % (self.client_address, self.user))
+                    self.log(logging.INFO, "%(user)s logged in.", user=self.user)
                     self.is_authenticated = True
                 continue
             elif command[0] == "PASS" and self.user:
@@ -254,7 +260,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                     self.reply("430 Invalid username or password")
                 else:
                     self.reply("230 User logged in, proceed.")
-                    self.logger.info("[%s] %s logged in." % (self.client_address, self.user))
+                    self.log(logging.INFO, "%(user)s logged in.", user=self.user)
                     self.is_authenticated = True
                 continue
             elif command[0] in ("NOOP", "ALLO"):
@@ -312,7 +318,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 else:
                     path = self.current_path
 
-                self.logger.info("[%s] %s %s" % (str(self.client_address), command[0], path))
+                self.log(logging.INFO, "%(command)s %(path)s", command=command[0], path=path)
 
                 if command[0] == "NLST":
                     response = StringIO.StringIO()
@@ -345,7 +351,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 which_file = self.build_path(command[1], expect="file")
                 if which_file == False:
                     continue
-                self.logger.info("[%s] RETR %s" % (str(self.client_address), which_file))
+                self.log(logging.INFO, "%(command)s %(path)s", command=command[0], path=which_file)
                 self.reply_with_file(open(which_file, "r"))
                 continue
             elif command[0] == "CDUP":
@@ -372,7 +378,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 if command[0] == "STOU" and os.path.exists(target_file):
                     self.reply("450 Requested file action not taken.")
                     continue
-                self.logger.info("[%s] %s %s" % (str(self.client_address), command[0], target_file))
+                self.log(logging.INFO, "%(command)s %(path)s", command=command[0], path=target_file)
                 try:
                     target = open(target_file, "w" if command[0] != "APPE" else "a")
                 except:
@@ -396,7 +402,8 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                     continue
                 try:
                     os.rename(self.rename_target, target)
-                    self.logger.info("[%s] Rename %s -> %s" % (str(self.client_address), self.rename_target, target))
+
+                    self.log(logging.INFO, "Rename %(source) -> %(target)s", source=self.rename_target, target=target)
                     self.reply("250 Requested file action okay, completed.")
                 except:
                     self.reply("553 Requested action not taken.")
@@ -411,7 +418,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                         os.unlink(target)
                     else:
                         os.rmdir(target)
-                    self.logger.info("[%s] %s %s" % (str(self.client_address), command[0], target))
+                    self.log(logging.INFO, "%(command)s %(path)s", command=command[0], path=target)
                     self.reply("250 Requested file action okay, completed.")
                 except:
                     self.reply("553 Requested action not taken.")
@@ -422,7 +429,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                     continue
                 try:
                     os.mkdir(target)
-                    self.logger.info("[%s] MKDIR %s" % (str(self.client_address), target))
+                    self.log(logging.INFO, "%(command)s %(path)s", command=command[0], path=target)
                     self.reply("257 \"%s\" created." % target)
                 except:
                     self.reply("553 Requested action not taken.")
@@ -461,6 +468,12 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     """
     timeout = 10
     logger  = logging.getLogger("http")
+
+    def log(self, lvl, msg, *args, **kwargs):
+        kwargs.update({
+            "ip": self.client_address[0],
+        })
+        self.logger.log(lvl, msg, kwargs)
 
     def __init__(self, request, client_address, server, options={}):
         self.headers = {}
@@ -521,7 +534,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
     def send_header(self, status, headers):
         "Send the headers of a reply."
-        self.logger.info("[%s] %s %s %s" % (self.client_address, status.split()[0], self.method, self.path))
+        self.log(logging.INFO, "%(status)s %(method)s %(path)s", status=status.split()[0], method=self.method, path=self.path)
+
         if "Host" not in headers:
             headers["Host"] = self.headers["host"][0] if "host" in self.headers else socket.gethostbyname()
         if "Connection" not in headers:
@@ -853,14 +867,14 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         self.handle_request_for_file()
 
     def handle(self):
-        self.logger.debug("[%s] Accepted connection", self.client_address)
+        self.log(logging.DEBUG, "Accepted connection")
         while not self.rfile.closed:
             try:
                 self.handle_request()
             except socket.error:
                 break
             except Exception as e:
-                self.logger.error("Exception: %s" % "".join(traceback.format_exc()))
+                self.log(logging.ERROR, "Exception %(exception_info)s", exception_info="".join(traceback.format_exc()))
                 try:
                     self.send_error("500 Internal Server Error", True, details=str(e))
                 except socket.error:
@@ -1000,6 +1014,32 @@ def urldecode(string):
     "Replace %xx escape sequences by their byte values"
     return re.sub("%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1), 16)), string)
 
+
+class LogFormatter(logging.Formatter):
+    def format(self, record):
+        if "ip" in record.args:
+            base = "\033[34m[%s %s] \033[35m%s\033[0m " % (self.formatTime(record, "%H:%I:%S"), record.name, record.args["ip"])
+        else:
+            base = "\033[34m[%s %s] " % (self.formatTime(record, "%H:%I:%S"), record.name)
+        if record.levelno > logging.WARNING:
+            col = 31
+        elif record.levelno > logging.DEBUG:
+            col = 32
+        else:
+            col = 0
+
+        # till 36
+        cycle = [ 33, 34, 35, 36, 0 ]
+        msg = record.msg
+        parts = msg.split()
+        for i in range(len(parts)):
+            if parts[i][0] == "%":
+                parts[i] = "\033[%dm%s\033[0m" % (cycle[0], parts[i])
+                cycle = cycle[1:] + [ cycle[0] ]
+        msg = " ".join(parts)
+        out = msg % record.args
+        return "%s\033[%dm%s\033[0m" % (base, col, out)
+
 def main():
     port = 1234
     user = False
@@ -1019,6 +1059,11 @@ def main():
         show_help()
 
     logging.basicConfig(level=logging.DEBUG if "-v" in options else logging.INFO)
+
+    log_handler = logging.StreamHandler()
+    log_handler.setFormatter(LogFormatter())
+    logging.getLogger().handlers = []
+    logging.getLogger().addHandler(log_handler)
     logger = logging.getLogger("main")
 
     cgi_handlers = determine_available_cgi_handlers()
@@ -1037,7 +1082,7 @@ def main():
     if "-h" in options:
         server, httpd_port = setup_tcp_server(HttpHandler, port, server_options)
         servers.append(server)
-        logger.info("HTTP server started on port %d", httpd_port)
+        logger.info("HTTP server started on port %(port)d", {"port": httpd_port})
         if "-a" in options:
             create_avahi_group("http", httpd_port)
             if "-d" in options:
@@ -1047,7 +1092,7 @@ def main():
     if "-f" in options:
         server, ftpd_port = setup_tcp_server(FtpHandler, port, server_options)
         servers.append(server)
-        logger.info("FTP server started on port %d", ftpd_port)
+        logger.info("FTP server started on port %(port)d", {"port": ftpd_port})
         create_avahi_group("ftp", ftpd_port)
 
     wait_for_signal(servers)
