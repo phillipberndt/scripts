@@ -6,10 +6,10 @@
 #
 import SocketServer
 import StringIO
+import argparse
 import atexit
 import base64
 import datetime
-import getopt
 import grp
 import itertools
 import logging
@@ -31,8 +31,6 @@ import urlparse
 from wsgiref.handlers import format_date_time
 
 # TODO ngrok support (?!)
-# TODO Per-service port configuration
-# TODO Custom SSL certificates
 
 try:
     import gtk
@@ -62,23 +60,21 @@ try:
 except:
     has_ssl = False
 
-HELP_TEXT = """megad
-Copyright (c) 2015, Phillip Berndt
-
-Syntax: megad -<f,h> [other options] [port]
-
-Options:
-    -a                  Announce services via Avahi
-    -c                  Allow CGI in httpd
-    -d                  Allow webdav access in httpd
-    -f                  Run ftpd
-    -h                  Run httpd
-    -H                  Run httpsd
-    -p "user:password"  Only allow authenticated access
-    -v                  Be more verbose
-    -w                  Allow write access
-
-"""
+class SSLKey(object):
+    "Tiny container for certificate information that can create self-signed temporary certificates on the fly"
+    def __init__(self, cert=False, key=False):
+        if (bool(cert) ^ bool(key)):
+            raise ValueError("Either certificate or key not given")
+        if cert and key:
+            self.cert = cert
+            self.key = key
+        else:
+            self._certfile = tempfile.NamedTemporaryFile()
+            self._keyfile = tempfile.NamedTemporaryFile()
+            subprocess.call(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-out", self._certfile.name, "-keyout", self._keyfile.name], stdout=open("/dev/null", "w"), stderr=open("/dev/null", "w"))
+            self.key = self._keyfile.name
+            self.cert = self._certfile.name
+            logging.getLogger("main").info("SSL certificates created in %s (key) and %s (cert)", self.key, self.cert)
 
 class ReusableServer(SocketServer.ThreadingTCPServer):
     allow_reuse_address = True
@@ -92,19 +88,10 @@ class ReusableServer(SocketServer.ThreadingTCPServer):
         """Finish one request by instantiating RequestHandlerClass."""
         self.RequestHandlerClass(request, client_address, self, options=self.__options)
 
-class ReusableTLSServer(ReusableServer):
-    def __init__(self, server_address, RequestHandlerClass, options={}):
-        """Constructor.  May be extended, do not override."""
-        ReusableServer.__init__(self, server_address, RequestHandlerClass, options)
-
-        self.keyfile = tempfile.NamedTemporaryFile()
-        self.certfile = tempfile.NamedTemporaryFile()
-        subprocess.call(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-out", self.certfile.name, "-keyout", self.keyfile.name], stdout=open("/dev/null", "w"), stderr=open("/dev/null", "w"))
-        logging.getLogger("main").debug("SSL certificates created in %s, %s", self.keyfile.name, self.certfile.name)
-
     def get_request(self):
-        sock, client_address = ReusableServer.get_request(self)
-        sock = ssl.wrap_socket(sock, self.keyfile.name, self.certfile.name, True, ssl_version = ssl.PROTOCOL_TLSv1 | ssl.PROTOCOL_SSLv23)
+        sock, client_address = SocketServer.ThreadingTCPServer.get_request(self)
+        if "ssl_wrap" in self.__options:
+            sock = ssl.wrap_socket(sock, self.__options["ssl_wrap"].key, self.__options["ssl_wrap"].cert, True, ssl_version = ssl.PROTOCOL_TLSv1 | ssl.PROTOCOL_SSLv23)
         return sock, client_address
 
 
@@ -940,12 +927,12 @@ def fd_copy(source_file, target_file, length):
                 target_file.write(data)
             length -= len(data)
 
-def setup_tcp_server(handler_class, base_port=1234, options={}, server_class=ReusableServer):
+def setup_tcp_server(handler_class, base_port=1234, options={}):
     "Setup a SocketServer on a variable path. Returns the instance and the actual port as a tuple."
     counter = 0
     while True:
         try:
-            server = server_class(("", base_port + counter), handler_class, options=options)
+            server = ReusableServer(("", base_port + counter), handler_class, options=options)
             break
         except socket.error:
             counter += 1
@@ -953,10 +940,6 @@ def setup_tcp_server(handler_class, base_port=1234, options={}, server_class=Reu
                 raise
     threading.Thread(target=server.serve_forever).start()
     return server, base_port + counter
-
-def setup_tls_server(handler_class, base_port=1234, options={}):
-    "Setup a TLS wrapped SocketServer on a variable path. Returns the instance and the actual port as a tuple."
-    return setup_tcp_server(handler_class, base_port, options, ReusableTLSServer)
 
 def setup_tcp_server_socket(base_port=1234):
     "Setup a TCP socket on a variable path. Returns the instance and the actual port as a tuple."
@@ -1017,10 +1000,6 @@ def iso_time(timestamp):
     "Return an ISO 8601 formatted timestamp."
     return time.strftime("%Y-%m-%dT%H:%M:%S.0Z", time.localtime(timestamp))
 
-def show_help():
-    "Show help text and exit"
-    print HELP_TEXT
-    sys.exit(0)
 
 def determine_available_cgi_handlers():
     "Return a dictionary of file extensions mapping to available CGI handlers"
@@ -1042,7 +1021,6 @@ def ucparts(string):
 def urldecode(string):
     "Replace %xx escape sequences by their byte values"
     return re.sub("%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1), 16)), string)
-
 
 class LogFormatter(logging.Formatter):
     def format(self, record):
@@ -1070,24 +1048,33 @@ class LogFormatter(logging.Formatter):
         return "%s\033[%dm%s\033[0m" % (base, col, out)
 
 def main():
-    port = 1234
     user = False
     password = False
-    try:
-        (options, arguments) = getopt.getopt(sys.argv[1:], "fFhHdwdcvap:")
-        if arguments:
-            port = int(arguments[0])
-        if len(arguments) > 1:
-            raise ValueError()
-        options = dict(options)
-        if "-f" not in options and "-h" not in options and "-H" not in options:
-            raise ValueError()
-        if "-p" in options:
-            user, password = options["-p"].split(":")
-    except:
-        show_help()
 
-    logging.basicConfig(level=logging.DEBUG if "-v" in options else logging.INFO)
+    parser = argparse.ArgumentParser("iwebd", description="Instant web services\nCopyright (c) 2015, Phillip Berndt", add_help=False)
+    parser.add_argument("-f", nargs="?", default=False, type=int, help="Run ftpd", metavar="port")
+    parser.add_argument("-h", nargs="?", default=False, type=int, help="Run httpd", metavar="port")
+    parser.add_argument("-H", nargs="?", default=False, type=int, help="Run httpsd", metavar="port")
+    parser.add_argument("-d", action="store_true", help="Activate webdav in httpd")
+    parser.add_argument("-w", action="store_true", help="Activate write access (webdav/ftpd)")
+    parser.add_argument("-c", action="store_true", help="Allow CGI in httpd")
+    parser.add_argument("-a", action="store_true", help="Announce services via Avahi")
+    parser.add_argument("-p", help="Only allow authenticated access for user:password", metavar="user:password")
+    parser.add_argument("-v", action="store_true", help="Be more verbose")
+    parser.add_argument("--ssl-cert", help="Use a custom SSL certificate (Default: Auto-generated)", metavar="file")
+    parser.add_argument("--ssl-key", help="Use a custom SSL keyfile (Default: Auto-generated)", metavar="file")
+    parser.add_argument("--help", action="help", help="Display this help")
+    options = vars(parser.parse_args(sys.argv[1:]))
+
+    if options["f"] is False and options["h"] is False and options["H"] is False:
+        parser.error("One of the server options (-f, -h, -H) is required.")
+    if options["p"]:
+        try:
+            user, password = options["p"].split(":")
+        except:
+            parser.error("-p requires an argument of the type `user:password'.")
+
+    logging.basicConfig(level=logging.DEBUG if options["v"] else logging.INFO)
 
     log_handler = logging.StreamHandler()
     log_handler.setFormatter(LogFormatter())
@@ -1098,39 +1085,50 @@ def main():
     cgi_handlers = determine_available_cgi_handlers()
 
     server_options = {
-        "write_access": "-w" in options,
-        "dav_enabled": "-d" in options,
+        "write_access": options["w"],
+        "dav_enabled": options["d"],
         "user": user,
         "pass": password,
-        "allow_cgi": "-c" in options,
+        "allow_cgi": options["c"],
         "cgi_handlers": cgi_handlers,
     }
+
+    if options["H"] is not False:
+        if options["ssl_cert"] or options["ssl_key"]:
+            assert os.path.isfile(options["ssl_cert"])
+            assert os.path.isfile(options["ssl_key"])
+            ssl_key = SSLKey(options["ssl_cert"], options["ssl_key"])
+        else:
+            ssl_key = SSLKey()
 
     servers = []
 
     http_variants = []
-    if "-h" in options:
-        http_variants.append(("HTTP", setup_tcp_server))
-    if "-H" in options:
+    if options["h"] is not False:
+        http_variants.append(("HTTP", {}, options["h"] or 1234))
+    if options["H"] is not False:
         if not has_ssl:
             raise ValueError("No SSL available.")
-        http_variants.append(("HTTPS", setup_tls_server))
+        http_variants.append(("HTTPS", {"ssl_wrap": ssl_key}, options["H"] or 1234))
 
-    for name, server_setup_function in http_variants:
-        server, httpd_port = server_setup_function(HttpHandler, port, server_options)
+    for name, additional_options, port in http_variants:
+        actual_options = server_options.copy()
+        actual_options.update(additional_options)
+        server, httpd_port = setup_tcp_server(HttpHandler, port, actual_options)
         servers.append(server)
         logger.info("%(what)s server started on port %(port)d", {"what": name, "port": httpd_port})
-        if "-a" in options:
+        if options["a"]:
             create_avahi_group("http", httpd_port)
-            if "-d" in options:
+            if options["d"]:
                 user = user or "anonymous"
                 create_avahi_group("webdav", httpd_port, [ "u=%s" % user, "path=/" ])
 
-    if "-f" in options:
-        server, ftpd_port = setup_tcp_server(FtpHandler, port, server_options)
+    if options["f"] is not False:
+        server, ftpd_port = setup_tcp_server(FtpHandler, options["f"] or 1234, server_options)
         servers.append(server)
-        logger.info("FTP server started on port %(port)d", {"port": ftpd_port})
-        create_avahi_group("ftp", ftpd_port)
+        logger.info("%(what)s server started on port %(port)d", {"what": "FTP", "port": ftpd_port})
+        if options["a"]:
+            create_avahi_group("ftp", ftpd_port)
 
     wait_for_signal(servers)
 
