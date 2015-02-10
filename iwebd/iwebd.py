@@ -992,6 +992,7 @@ def create_avahi_group(service, port, text=[]):
     group = dbus.Interface(bus.get_object(DBUS_NAME, dbserver.EntryGroupNew()), DBUS_INTERFACE_ENTRY_GROUP)
     group.AddService(IF_UNSPEC, PROTO_UNSPEC, dbus.UInt32(0), "megad on " + socket.gethostname(), "_%s._tcp" % service, "", "", dbus.UInt16(port), dbus.Array(text))
     group.Commit()
+    logging.getLogger("main").info("Registered %(what)s at port %(port)d with avahi, attributes: %(attributes)s", { "what": "_%s._tcp" % service, "port": port, "attributes": ", ".join(text) or "(none)" })
 
     atexit.register(group.Reset)
     return group
@@ -1106,23 +1107,23 @@ def main():
 
     http_variants = []
     if options["h"] is not False:
-        http_variants.append(("HTTP", {}, options["h"] or 1234))
+        http_variants.append(("HTTP", {}, options["h"] or 1234, "http", "webdav"))
     if options["H"] is not False:
         if not has_ssl:
             raise ValueError("No SSL available.")
-        http_variants.append(("HTTPS", {"ssl_wrap": ssl_key}, options["H"] or 1234))
+        http_variants.append(("HTTPS", {"ssl_wrap": ssl_key}, options["H"] or 1234, "https", "webdavs"))
 
-    for name, additional_options, port in http_variants:
+    for name, additional_options, port, avahi_name_http, avahi_name_webdav in http_variants:
         actual_options = server_options.copy()
         actual_options.update(additional_options)
         server, httpd_port = setup_tcp_server(HttpHandler, port, actual_options)
         servers.append(server)
         logger.info("%(what)s server started on port %(port)d", {"what": name, "port": httpd_port})
         if options["a"]:
-            create_avahi_group("http", httpd_port)
+            create_avahi_group(avahi_name_http, httpd_port)
             if options["d"]:
                 user = user or "anonymous"
-                create_avahi_group("webdav", httpd_port, [ "u=%s" % user, "path=/" ])
+                create_avahi_group(avahi_name_webdav, httpd_port, [ "u=%s" % user, "path=/" ])
 
     if options["f"] is not False:
         server, ftpd_port = setup_tcp_server(FtpHandler, options["f"] or 1234, server_options)
