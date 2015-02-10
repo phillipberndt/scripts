@@ -1051,7 +1051,7 @@ def main():
     user = False
     password = False
 
-    parser = argparse.ArgumentParser("iwebd", description="Instant web services\nCopyright (c) 2015, Phillip Berndt", add_help=False)
+    parser = argparse.ArgumentParser("iwebd", description="Instant web services. Copyright (c) 2015, Phillip Berndt.", epilog="It is required to supply at least one of the server options.", add_help=False)
     parser.add_argument("-f", nargs="?", default=False, type=int, help="Run ftpd", metavar="port")
     parser.add_argument("-h", nargs="?", default=False, type=int, help="Run httpd", metavar="port")
     parser.add_argument("-H", nargs="?", default=False, type=int, help="Run httpsd", metavar="port")
@@ -1067,7 +1067,8 @@ def main():
     options = vars(parser.parse_args(sys.argv[1:]))
 
     if options["f"] is False and options["h"] is False and options["H"] is False:
-        parser.error("One of the server options (-f, -h, -H) is required.")
+        parser.print_help()
+        parser.exit(0)
     if options["p"]:
         try:
             user, password = options["p"].split(":")
