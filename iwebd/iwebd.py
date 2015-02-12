@@ -885,7 +885,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             if not authentication_ok:
                 digest_authentication_challenge = ", ".join([
                    'Digest realm="megad webserver"',
-                   'qop="auth,auth-int"',
+                   'qop="auth"',
                    'nonce="{nonce}"',
                    'opaque="0"',
                 ]).format(nonce=self.generate_nonce())
