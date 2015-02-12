@@ -11,6 +11,7 @@ import atexit
 import base64
 import datetime
 import grp
+import hashlib
 import itertools
 import logging
 import mimetypes
@@ -27,6 +28,7 @@ import threading
 import time
 import traceback
 import urlparse
+import uuid
 
 from wsgiref.handlers import format_date_time
 
@@ -491,6 +493,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         self.headers = {}
         self.http_version = "HTTP/1.1"
         self.options = options
+        if not "_http_active_nonces" in options:
+            options["_http_active_nonces"] = {}
+        self.active_nonces = options["_http_active_nonces"]
         self.body_read = False
         SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
 
@@ -552,9 +557,14 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             headers["Host"] = self.headers["host"][0] if "host" in self.headers else socket.gethostbyname()
         if "Connection" not in headers:
             headers["Connection"] = self.headers["connection"][0] if "connection" in self.headers else ("Keep-Alive" if self.http_version.lower() == "http/1.1" else "Close")
-        self.wfile.write("%s %s\r\n%s\r\n\r\n" % (self.http_version, status, "\r\n".join([
-            "%s: %s" % (name, value) for name, value in headers.items()
-        ])))
+        headers_list = []
+        for name, value in headers.items():
+            if type(value) is list:
+                for svalue in value:
+                    headers_list.append("%s: %s" % (name, svalue))
+            else:
+                headers_list.append("%s: %s" % (name, value))
+        self.wfile.write("%s %s\r\n%s\r\n\r\n" % (self.http_version, status, "\r\n".join(headers_list)))
 
     def send_error(self, error_message, force_close=False, details="", headers={}):
         "Reply with an error message. After calling this, you can safely return from any handler."
@@ -823,6 +833,12 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             return False
         return mapped_path
 
+    def generate_nonce(self):
+        "Generate a nonce for Digest authentication"
+        nonce = uuid.uuid4().hex
+        self.active_nonces[nonce] = { "time": time.time(), "used_nc": [] }
+        return nonce
+
     def handle_request(self):
         "Handle a single request."
         self.body_read = False
@@ -837,14 +853,45 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         if "user" in self.options and self.options["user"]:
             # Authenticate the user
             authentication_ok = False
+            is_stale = False
             if "authorization" in self.headers:
-                method, param = self.headers["authorization"][0].split()
+                method, param = self.headers["authorization"][0].split(None, 1)
                 if method.lower() == "basic":
                     user, password = base64.b64decode(param).split(":", 1)
                     if user == self.options["user"] and password == self.options["pass"]:
                         authentication_ok = True
+                elif method.lower() == "digest":
+                    params = {}
+                    for partial_param in param.split(","):
+                        name, value = partial_param.strip().split("=", 1)
+                        if value[0] == '"' and value[-1] == '"':
+                            value = value[1:-1]
+                        params[name] = value
+                    if params["nonce"] in self.active_nonces and self.active_nonces[params["nonce"]]["time"] > time.time() - 600:
+                        data = self.active_nonces[params["nonce"]]
+                        ha1 = hashlib.md5("%s:%s:%s" % (params["username"], params["realm"], self.options["pass"])).hexdigest()
+                        ha2 = hashlib.md5("%s:%s" % (self.method, params["uri"])).hexdigest()
+                        response = hashlib.md5("%s:%s:%s:%s:%s:%s" % (ha1, params["nonce"], params["nc"], params["cnonce"], params["qop"], ha2)).hexdigest()
+                        self.logger.debug("Digest authentication: Excpected %(expect)s, received %(received)s", {"expect": response, "received": str(params)})
+                        if params["nc"] not in data["used_nc"] and response == params["response"] and params["username"] == self.options["user"]:
+                            # Testing for nc > last_nc (base 16!) suffices in
+                            # theory, but due to the thread-bases approach I
+                            # use here it doesn't. Also, note that there's a race
+                            # condition here.
+                            data["used_nc"].append(params["nc"])
+                            authentication_ok = True
+                    else:
+                        is_stale = True
             if not authentication_ok:
-                self.send_error("401 Not Authorized", headers={ "WWW-Authenticate": "Basic realm=\"megad webserver\"" })
+                digest_authentication_challenge = ", ".join([
+                   'Digest realm="megad webserver"',
+                   'qop="auth,auth-int"',
+                   'nonce="{nonce}"',
+                   'opaque="0"',
+                ]).format(nonce=self.generate_nonce())
+                if is_stale:
+                    digest_authentication_challenge += ", stale=TRUE"
+                self.send_error("401 Not Authorized", headers={ "WWW-Authenticate": [ digest_authentication_challenge, 'Basic realm="megad webserver"' ] })
                 return
 
         if self.path.startswith("/.directory-icons/") and has_gtk:
