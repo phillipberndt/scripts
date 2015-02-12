@@ -17,8 +17,9 @@ iwebd's features include
    * Only `ls -l' style LISTings
    * Binary mode only
  * httpd
-   * Authentication
+   * Authentication (Basic/Digest)
    * webdav (with write access)
+   * SSL
    * CGI
    * Range'd requests
    * Fancy directory listings with icons if you have pyGTK
@@ -27,6 +28,6 @@ iwebd's features include
 
 Superseded, but available in the repository's history are:
 
- * ihttpd  (select() bases httpd with all of the above, minus webdav, plus mod_rewrite support)
+ * ihttpd  (select() based httpd with all of the above, minus webdav, plus mod_rewrite support)
  * iftpd   (as above)
  * cihttpd (a C implementation of the instant httpd, but has never had much testing)
