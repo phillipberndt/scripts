@@ -8,7 +8,7 @@ use Term::ProgressBar;
 use Pod::Usage;
 
 # Load options
-use vars qw($test $progress $caseSensitive $wantHelp $matchParts);
+use vars qw($test $progress $caseSensitive $wantHelp $matchParts $onlyOne);
 my $directory = ".";
 Getopt::Long::Configure ("bundling", "no_getopt_compat", "prefix_pattern=--|-");
 GetOptions(
@@ -17,6 +17,7 @@ GetOptions(
 	"directory|d:s" => \$directory,
 	"case-sensitive|s!" => \$caseSensitive,
 	"fuzzy|f!" => \$matchParts,
+	"one|o!" => \$onlyOne,
 	"help|h!" => \$wantHelp,
 );
 pod2usage({ exitval => 1, msg => "gdo Usage:\n gdo [options] <search pattern> +<anded-search-pattern> [<substitution>]\n" }) if $wantHelp or $#ARGV < 0;
@@ -85,6 +86,8 @@ sub match {
 			}
 		}
 	}
+
+	exit(0) if($onlyOne);
 }
 
 # Exit after 2 Sig int's
@@ -173,6 +176,10 @@ Search case sensitive
 =item -f
 
 Fuzzy matching: e.g., etinapa matches /etc/init.d/apache
+
+=item -o
+
+Only show/use the first match
 
 =back
 
