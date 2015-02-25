@@ -657,26 +657,46 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     def handle_request_for_file(self):
         "Handle a request for a file, simple GET/HEAD/POST case."
         if os.path.isdir(self.mapped_path):
-            mime_type = "text/html"
-            data = [ "<!DOCTYPE HTML><title>Directory contents for %(path)s</title><style type='text/css'>ul, li { list-style-type: none; }</style><body><h1>Directory contents for %(path)s</h1><ul>" % { "path": xml_escape(urldecode(self.path)) } ]
-            base = self.path + ("/" if self.path[-1] != "/" else "")
+            mime_type = "text/html; charset=utf8"
+            data = [ """<!DOCTYPE HTML><meta charset=utf8><title>Directory contents for %(path)s</title><style type='text/css'>
+                    body { font-size: 12px; font-family: sans-serif; }
+                    img { vertical-align: middle; }
+                    ul, li { list-style-type: none; }
+                    ul { column-count: 5; -moz-column-count: 5; -webkit-column-count: 5; column-width: 250px; -moz-column-width: 250px; -webkit-column-width: 250px;}
+                    a { font-weight: bold; }
+                </style><body><h1>Directory contents for %(path)s</h1><p>Directory: <a href="/">root</a> """ % { "path": xml_escape(urldecode(self.path)) } ]
 
+            full_dirspec = "/"
+            for dirspec in urldecode(self.path).split("/"):
+                if not dirspec:
+                    continue
+                full_dirspec = "%s%s/" % (full_dirspec, dirspec)
+                data.append('&raquo; <a href="%s">%s</a>' % (full_dirspec, dirspec))
+            data.append("</p><ul>")
+
+            base = self.path + ("/" if self.path[-1] != "/" else "")
             dirs = []
             files = []
 
-            for name in itertools.chain([".."], os.listdir(self.mapped_path)):
+            for name in sorted(os.listdir(self.mapped_path), key=natsort_key):
+                if name[0] == ".":
+                    continue
                 absname = os.path.join(self.mapped_path, name)
                 if os.path.isdir(absname):
                     if has_gtk:
-                        dirs.append("<li><img src='/.directory-icons/inode-directory'> <a href='%s'>%s/</a></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
+                        dirs.append("<li><img src='/.directory-icons/inode-directory'> <a href='%s'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
                     else:
-                        dirs.append("<li><a href='%s'>%s/</a></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
+                        dirs.append("<li><a href='%s'>%s/</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
                 else:
-                    file_mime_type = mimetypes.guess_type(absname)[0] or "application/octet-stream"
+                    try:
+                        file_mime_type = mimetypes.guess_type(absname)[0] or "application/octet-stream"
+                        size = format_size(os.stat(absname).st_size)
+                    except:
+                        size = 0
                     if has_gtk and gtk.icon_theme_get_default().has_icon(file_mime_type.replace("/", "-")):
-                        files.append("<li><img src='/.directory-icons/%s'> <a href='%s'>%s</a></li>" % (file_mime_type.replace("/", "-"), xml_escape(os.path.join(base, name)), xml_escape(name)))
+                        files.append("<li><img src='/.directory-icons/%s'> <a href='%s'>%s</a> <em>%s</em></li>" % (file_mime_type.replace("/", "-"), xml_escape(os.path.join(base, name)), xml_escape(name), size))
                     else:
-                        files.append("<li><a href='%s'>%s</a></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
+                        files.append("<li><a href='%s'>%s</a> <em>%s</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name), size))
 
             data += dirs
             data += files
@@ -955,6 +975,15 @@ def xml_escape(string):
     "Escape special XML/HTML characters"
     return string.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
+def format_size(size):
+    "Format a human-readable file size"
+    prefix = ""
+    for prefix in ("", "K", "M", "G", "T"):
+        if size < 1024:
+            break
+        size /= 1024.
+    return "%2.2f %sBi" % (size, prefix)
+
 def fd_copy(source_file, target_file, length):
     "Copy length bytes from source_file to target_file"
     buffer = 10240
@@ -1069,6 +1098,10 @@ def ucparts(string):
 def urldecode(string):
     "Replace %xx escape sequences by their byte values"
     return re.sub("%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1), 16)), string)
+
+def natsort_key(string):
+    "Return a key for natural sorting of a string argument"
+    return [ int(s) if s.isdigit() else s for s in re.split(r"\d+", string) ]
 
 class LogFormatter(logging.Formatter):
     def format(self, record):
