@@ -10,6 +10,7 @@ import argparse
 import atexit
 import base64
 import datetime
+import email
 import grp
 import hashlib
 import itertools
@@ -29,6 +30,7 @@ import time
 import traceback
 import urlparse
 import uuid
+import tarfile
 
 from wsgiref.handlers import format_date_time
 
@@ -95,7 +97,6 @@ class ReusableServer(SocketServer.ThreadingTCPServer):
         if "ssl_wrap" in self.__options:
             sock = ssl.wrap_socket(sock, self.__options["ssl_wrap"].key, self.__options["ssl_wrap"].cert, True, ssl_version = ssl.PROTOCOL_TLSv1 | ssl.PROTOCOL_SSLv23)
         return sock, client_address
-
 
 class FtpHandler(SocketServer.StreamRequestHandler):
     """
@@ -464,6 +465,33 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 self.reply("502 Command not implemented.")
                 continue
 
+class ChunkWrapper(object):
+    "Context-Wrapper around a file-like object that intercepts calls to write() and outputs chunks instead"
+    def __init__(self, fileobj):
+       self.fileobj = fileobj
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.fileobj.write("0\r\n\r\n")
+
+    def write(self, data):
+        self.fileobj.write("%x\r\n%s\r\n" % (len(data), data))
+
+    def flush(self):
+        self.fileobj.flush()
+
+    def truncate(self):
+        pass
+
+    def writelines(self, lines):
+        for line in lines:
+            self.write("%s\n" % line)
+
+    def close(self):
+        pass
+
 class HttpHandler(SocketServer.StreamRequestHandler):
     """
         HTTP server
@@ -646,17 +674,48 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         else:
             headers["Transfer-Encoding"] = "chunked"
             self.send_header(status, headers)
-            while True:
-                data = os.read(cgi_process.stdout.fileno(), 10240)
-                if not data:
-                    break
-                self.wfile.write("%x\r\n%s\r\n" % (len(data), data))
-            self.wfile.write("0\r\n\r\n")
+            with ChunkWrapper(self.wfile) as wfile:
+                fd_copy(cgi_process.stdout, wfile, -1)
         cgi_process.terminate()
 
     def handle_request_for_file(self):
         "Handle a request for a file, simple GET/HEAD/POST case."
         if os.path.isdir(self.mapped_path):
+            request = urlparse.urlparse(self.path)
+            query = urlparse.parse_qs(request.query)
+            path = request.path
+
+            if "action" in query and query["action"][0] == "download":
+                self.send_header("200 Ok", { "Content-Type": "application/x-gtar", "Content-Disposition": "attachment; filename=directory.tar.bz2", "Transfer-Encoding": "chunked" })
+                with ChunkWrapper(self.wfile) as wfile:
+                    outfile = tarfile.open(mode="w|bz2", fileobj=wfile, format=tarfile.USTAR_FORMAT)
+                    outfile.add(self.mapped_path, "")
+                    outfile.close()
+                return
+
+            if "write_access" in self.options and "content-type" in self.headers:
+                body = StringIO.StringIO()
+                body.write("Content-Type: %s\r\n\r\n" % (self.headers["content-type"][0]))
+                self.read_http_body(body)
+                msg = email.message_from_string(body.getvalue())
+                is_upload = False
+                for part in msg.get_payload():
+                    if "upload" in part.get("content-disposition", "") and part.get_payload() == "Upload":
+                        is_upload = True
+                        break
+                if is_upload:
+                    for part in msg.get_payload():
+                        disposition = part.get("content-disposition", "")
+                        filename = re.search(r'filename="((?:[^"]|\")+)"', disposition)
+                        if filename:
+                            filename = filename.group(1).replace(r'\"', '"')
+                            self.logger.info("Received file %(filename)s", { "filename": filename })
+                            if not "/" in filename:
+                                with open(filename, "w") as outfile:
+                                    outfile.write(part.get_payload())
+                    self.send_header("302 Found", { "Location": path, "Content-Length": 0 })
+                    return
+
             mime_type = "text/html; charset=utf8"
             data = [ """<!DOCTYPE HTML><meta charset=utf8><title>Directory contents for %(path)s</title><style type='text/css'>
                     body { font-size: 12px; font-family: sans-serif; }
@@ -664,17 +723,18 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     ul, li { list-style-type: none; }
                     ul { column-count: 5; -moz-column-count: 5; -webkit-column-count: 5; column-width: 250px; -moz-column-width: 250px; -webkit-column-width: 250px;}
                     a { font-weight: bold; }
-                </style><body><h1>Directory contents for %(path)s</h1><p>Directory: <a href="/">root</a> """ % { "path": xml_escape(urldecode(self.path)) } ]
+                </style><body><h1>Directory contents for %(path)s</h1><p>Directory: <a href="/">root</a> """ % { "path": xml_escape(urldecode(path)) } ]
 
             full_dirspec = "/"
-            for dirspec in urldecode(self.path).split("/"):
+            for dirspec in urldecode(path).split("/"):
                 if not dirspec:
                     continue
                 full_dirspec = "%s%s/" % (full_dirspec, dirspec)
                 data.append('&raquo; <a href="%s">%s</a>' % (full_dirspec, dirspec))
+            data.append(' (<a href="?action=download">Download as TAR.BZ2</a>)')
             data.append("</p><ul>")
 
-            base = self.path + ("/" if self.path[-1] != "/" else "")
+            base = path + ("/" if path[-1] != "/" else "")
             dirs = []
             files = []
 
@@ -700,7 +760,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
             data += dirs
             data += files
-            data.append("</ul></body>")
+            data.append("</ul>")
+            if "write_access" in self.options:
+                data.append('<form method="post" enctype="multipart/form-data"><h2>Upload</h2><input type=file multiple name=file><input type=submit name=upload value="Upload"></form>')
+            data.append("</body>")
             data = "\r\n".join(data)
             size = len(data)
             file = StringIO.StringIO(data)
@@ -717,31 +780,38 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         self.read_http_body()
         self.reply_with_file_like_object(file, size, mime_type, status)
 
-    def reply_with_file_like_object(self, file, size, mime_type, status):
+    def reply_with_file_like_object(self, file, size, mime_type, status, additional_headers={}):
         "Reply to a request with a file object"
         start = 0
-        headers = {}
-        if "range" in self.headers:
-            req_range_type, req_range = self.headers["range"][0].split("=")
-            range_start, range_end = req_range.split("-")
-            range_start = int(range_start) if range_start else 0
-            range_end = int(range_end) if range_end else (size - 1)
-            if req_range_type.lower() != "bytes" or range_start < 0 or range_end < range_start or range_end > size:
-                self.send_error("416 Range Not Satisfiable")
-                return
-            status = "206 Partial Content"
-            headers["Content-Range"] = "bytes %d-%d/%d" % (range_start, range_end, size)
-            start = range_start
-            size = range_end - range_start + 1
+        headers = additional_headers.copy()
+        if size > 0:
+            if "range" in self.headers:
+                req_range_type, req_range = self.headers["range"][0].split("=")
+                range_start, range_end = req_range.split("-")
+                range_start = int(range_start) if range_start else 0
+                range_end = int(range_end) if range_end else (size - 1)
+                if req_range_type.lower() != "bytes" or range_start < 0 or range_end < range_start or range_end > size:
+                    self.send_error("416 Range Not Satisfiable")
+                    return
+                status = "206 Partial Content"
+                headers["Content-Range"] = "bytes %d-%d/%d" % (range_start, range_end, size)
+                start = range_start
+                size = range_end - range_start + 1
 
-        file.seek(start)
+            file.seek(start)
+            headers["Accept-Ranges"] = "bytes"
+            headers["Content-Length"] = size
+        else:
+            headers["Transfer-Encoding"] = "chunked"
 
-        headers["Content-Length"] = size
         headers["Content-Type"] = mime_type
-        headers["Accept-Ranges"] = "bytes"
         self.send_header(status, headers)
         if self.method.lower() != "head":
-            fd_copy(file, self.wfile, size)
+            if size < 0:
+                with ChunkWrapper(self.wfile) as wfile:
+                    fd_copy(file, wfile, size)
+            else:
+                fd_copy(file, self.wfile, size)
         file.close()
 
     def handle_dav_request(self):
@@ -986,17 +1056,23 @@ def format_size(size):
 
 def fd_copy(source_file, target_file, length):
     "Copy length bytes from source_file to target_file"
+    def _read(amount):
+        if hasattr(source_file, "fileno"):
+            return os.read(source_file.fileno(), amount)
+        else:
+            return source_file.read(amount)
+
     buffer = 10240
     if length < 0:
         while True:
-            data = source_file.read(buffer)
+            data = _read(buffer)
             if not data:
                 break
             if target_file:
                 target_file.write(data)
     else:
         while length > 0:
-            data = source_file.read(min(buffer, min(length, 10240)))
+            data = _read(min(buffer, min(length, 10240)))
             if not data:
                 raise IOError("Failed to read data")
             if target_file:
@@ -1152,7 +1228,7 @@ def main():
     parser.add_argument("-h", nargs="?", default=False, type=hostportpair, help="Run httpd", metavar="port")
     parser.add_argument("-H", nargs="?", default=False, type=hostportpair, help="Run httpsd", metavar="port")
     parser.add_argument("-d", action="store_true", help="Activate webdav in httpd")
-    parser.add_argument("-w", action="store_true", help="Activate write access (webdav/ftpd)")
+    parser.add_argument("-w", action="store_true", help="Activate write access")
     parser.add_argument("-c", action="store_true", help="Allow CGI in httpd")
     parser.add_argument("-a", action="store_true", help="Announce services via Avahi")
     parser.add_argument("-p", help="Only allow authenticated access for user:password", metavar="user:password")
