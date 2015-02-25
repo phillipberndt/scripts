@@ -1003,19 +1003,19 @@ def fd_copy(source_file, target_file, length):
                 target_file.write(data)
             length -= len(data)
 
-def setup_tcp_server(handler_class, base_port=1234, options={}):
+def setup_tcp_server(handler_class, base_port=("", 1234), options={}):
     "Setup a SocketServer on a variable path. Returns the instance and the actual port as a tuple."
     counter = 0
     while True:
         try:
-            server = ReusableServer(("", base_port + counter), handler_class, options=options)
+            server = ReusableServer((base_port[0], base_port[1] + counter), handler_class, options=options)
             break
         except socket.error:
             counter += 1
             if counter > 100:
                 raise
     threading.Thread(target=server.serve_forever).start()
-    return server, base_port + counter
+    return server, (base_port[0] or "*", base_port[1] + counter)
 
 def setup_tcp_server_socket(base_port=1234):
     "Setup a TCP socket on a variable path. Returns the instance and the actual port as a tuple."
@@ -1103,6 +1103,21 @@ def natsort_key(string):
     "Return a key for natural sorting of a string argument"
     return [ int(s) if s.isdigit() else s for s in re.split(r"\d+", string) ]
 
+def hostportpair(string):
+    "Parse a host/port specifier"
+    if ":" in string:
+        host, port = string.split(":")
+        if host in ("*", "a", "all"):
+            host = ""
+        elif host in ("lo", "l"):
+            host = "localhost"
+        if port == "":
+            port = 1234
+        return host, int(port)
+    else:
+        return "", int(string)
+
+
 class LogFormatter(logging.Formatter):
     def format(self, record):
         if "ip" in record.args:
@@ -1133,9 +1148,9 @@ def main():
     password = False
 
     parser = argparse.ArgumentParser("iwebd", description="Instant web services. Copyright (c) 2015, Phillip Berndt.", epilog="It is required to supply at least one of the server options.", add_help=False)
-    parser.add_argument("-f", nargs="?", default=False, type=int, help="Run ftpd", metavar="port")
-    parser.add_argument("-h", nargs="?", default=False, type=int, help="Run httpd", metavar="port")
-    parser.add_argument("-H", nargs="?", default=False, type=int, help="Run httpsd", metavar="port")
+    parser.add_argument("-f", nargs="?", default=False, type=hostportpair, help="Run ftpd", metavar="port")
+    parser.add_argument("-h", nargs="?", default=False, type=hostportpair, help="Run httpd", metavar="port")
+    parser.add_argument("-H", nargs="?", default=False, type=hostportpair, help="Run httpsd", metavar="port")
     parser.add_argument("-d", action="store_true", help="Activate webdav in httpd")
     parser.add_argument("-w", action="store_true", help="Activate write access (webdav/ftpd)")
     parser.add_argument("-c", action="store_true", help="Allow CGI in httpd")
@@ -1187,18 +1202,18 @@ def main():
 
     http_variants = []
     if options["h"] is not False:
-        http_variants.append(("HTTP", {}, options["h"] or 1234, "http", "webdav"))
+        http_variants.append(("HTTP", {}, options["h"] or ("", 1234), "http", "webdav"))
     if options["H"] is not False:
         if not has_ssl:
             raise ValueError("No SSL available.")
-        http_variants.append(("HTTPS", {"ssl_wrap": ssl_key}, options["H"] or 1234, "https", "webdavs"))
+        http_variants.append(("HTTPS", {"ssl_wrap": ssl_key}, options["H"] or ("", 1234), "https", "webdavs"))
 
     for name, additional_options, port, avahi_name_http, avahi_name_webdav in http_variants:
         actual_options = server_options.copy()
         actual_options.update(additional_options)
         server, httpd_port = setup_tcp_server(HttpHandler, port, actual_options)
         servers.append(server)
-        logger.info("%(what)s server started on port %(port)d", {"what": name, "port": httpd_port})
+        logger.info("%(what)s server started on %(port)s", {"what": name, "port": ":".join(map(str, httpd_port))})
         if options["a"]:
             create_avahi_group(avahi_name_http, httpd_port)
             if options["d"]:
@@ -1206,9 +1221,9 @@ def main():
                 create_avahi_group(avahi_name_webdav, httpd_port, [ "u=%s" % user, "path=/" ])
 
     if options["f"] is not False:
-        server, ftpd_port = setup_tcp_server(FtpHandler, options["f"] or 1234, server_options)
+        server, ftpd_port = setup_tcp_server(FtpHandler, options["f"] or ("", 1234), server_options)
         servers.append(server)
-        logger.info("%(what)s server started on port %(port)d", {"what": "FTP", "port": ftpd_port})
+        logger.info("%(what)s server started on %(port)s", {"what": "FTP", "port": ":".join(map(str, ftpd_port))})
         if options["a"]:
             create_avahi_group("ftp", ftpd_port)
 
