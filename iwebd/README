@@ -23,6 +23,8 @@ iwebd's features include
    * CGI
    * Range'd requests
    * Fancy directory listings with icons if you have pyGTK
+   * Download directories as archive files
+   * Upload files
  * Avahi announcement of both in the local network
  * Multi-threaded
 
