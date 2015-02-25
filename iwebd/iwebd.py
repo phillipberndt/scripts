@@ -1120,15 +1120,17 @@ def wait_for_signal(servers):
                 server.shutdown()
                 server.socket.shutdown(socket.SHUT_RDWR)
                 server.socket.close()
-            sys.exit(0)
+                del server.socket
         else:
             logging.warn("Second signal received. Killing the process.")
             os.closerange(3, 255)
             os.kill(os.getpid(), signal.SIGKILL)
     oldint = signal.signal(signal.SIGINT, _signal_handler)
     oldhup = signal.signal(signal.SIGHUP, _signal_handler)
-    while True:
+    while signal_count[0] == 0:
         time.sleep(3600)
+    while threading.active_count() > 1:
+        time.sleep(1)
     signal.signal(signal.SIGINT, oldint)
     signal.signal(signal.SIGHUP, oldhup)
 
