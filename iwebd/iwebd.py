@@ -513,6 +513,18 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     timeout = 10
     logger  = logging.getLogger("http")
 
+    SERVER_MESSAGE_PREAMBLE = """<!DOCTYPE HTML><meta charset=utf8><title>%(title)s</title>
+        <style type="text/css">
+            body { font-size: 14px; font-family: sans-serif; }
+            img { vertical-align: middle; }
+            ul, li { list-style-type: none; }
+            a { font-weight: bold; }
+        </style>
+        <body>
+        <h1>%(title)s</h1>
+
+    """
+
     def log(self, lvl, msg, *args, **kwargs):
         kwargs.update({
             "ip": self.client_address[0],
@@ -602,7 +614,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             force_close = True
         if force_close:
             self.headers["connection"] = [ "close" ]
-        body = "<!DOCTYPE HTML><title>%s</title><body><h1>%s</h1><pre>%s</pre>" % (error_message, error_message, xml_escape(details))
+        body = "%s%s</body>" % (self.SERVER_MESSAGE_PREAMBLE % { "title": error_message }, xml_escape(details))
         headers.update({ "Content-Length": len(body), "Content-Type": "text/html" })
         self.send_header(error_message, headers)
         self.wfile.write(body)
@@ -721,12 +733,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     return
 
             mime_type = "text/html; charset=utf8"
-            data = [ """<!DOCTYPE HTML><meta charset=utf8><title>Directory contents for %(path)s</title><style type='text/css'>
-                    body { font-size: 12px; font-family: sans-serif; }
-                    img { vertical-align: middle; }
-                    ul, li { list-style-type: none; }
-                    a { font-weight: bold; }
-                </style><body><h1>Directory contents for %(path)s</h1><p>Directory: <a href="/">root</a> """ % { "path": xml_escape(urldecode(path)) } ]
+            title = "Directory contents for %s" % xml_escape(urldecode(path))
+            data = [ self.SERVER_MESSAGE_PREAMBLE % { "title": title }, '<p>Directory: <a href="/">root</a>' ]
 
             full_dirspec = "/"
             for dirspec in urldecode(path).split("/"):
@@ -747,7 +755,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 absname = os.path.join(self.mapped_path, name)
                 if os.path.isdir(absname):
                     if has_gtk:
-                        dirs.append("<li><img src='/.directory-icons/inode-directory'> <a href='%s/'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
+                        dirs.append("<li><img src='/.directory-icons/inode-directory' alt='directory'> <a href='%s/'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
                     else:
                         dirs.append("<li><a href='%s/'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
                 else:
@@ -759,7 +767,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     if has_gtk:
                         if not gtk.icon_theme_get_default().has_icon(file_mime_type.replace("/", "-")):
                             file_mime_type = "application-octet-stream"
-                        files.append("<li><img src='/.directory-icons/%s'> <a href='%s'>%s</a> <em>%s</em></li>" % (file_mime_type.replace("/", "-"), xml_escape(os.path.join(base, name)), xml_escape(name), size))
+                        files.append("<li><img src='/.directory-icons/%s' alt='%s'> <a href='%s'>%s</a> <em>%s</em></li>" % (file_mime_type.replace("/", "-"), file_mime_type, xml_escape(os.path.join(base, name)), xml_escape(name), size))
                     else:
                         files.append("<li><a href='%s'>%s</a> <em>%s</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name), size))
 
