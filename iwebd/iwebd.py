@@ -1142,6 +1142,8 @@ def wait_for_signal(servers):
     while signal_count[0] == 0:
         time.sleep(3600)
     while threading.active_count() > 1:
+        print "\r\033[JWaiting for %d remaining conntections to terminate." % (threading.active_count() - 1, ),
+        sys.stdout.flush()
         time.sleep(1)
     signal.signal(signal.SIGINT, oldint)
     signal.signal(signal.SIGHUP, oldhup)
