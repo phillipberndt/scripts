@@ -36,6 +36,7 @@ from wsgiref.handlers import format_date_time
 
 # TODO ngrok support (?!)
 # TODO htaccess/mod_rewrite support for httpd
+# TODO PATH_INFO support (i.e. /foo.cgi/bar/baz)
 
 try:
     import gtk
@@ -614,6 +615,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         else:
             execute = [ self.mapped_path ]
 
+        path = urlparse.urlparse(self.path)
         environ = os.environ.copy()
         environ.update({
                 "SERVER_SOFTWARE": "ihttpd",
@@ -622,9 +624,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 "SERVER_PROTOCOL": self.http_version,
                 "SERVER_PORT": str(self.request.getsockname()[1]),
                 "REQUEST_METHOD": self.method,
-                "QUERY_STRING": urlparse.urlparse(self.path).query,
-                "SCRIPT_NAME": self.mapped_path,
-                "PATH_INFO": self.mapped_path,
+                "QUERY_STRING": path.query,
+                "SCRIPT_NAME": path.path,
+                "PATH_INFO": "",
                 "REQUEST_URI": self.path,
                 "PATH_TRANSLATED": os.path.abspath(self.mapped_path),
                 "REMOTE_ADDR": self.request.getpeername()[0],
