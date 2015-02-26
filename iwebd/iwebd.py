@@ -687,7 +687,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             path = request.path
 
             if "action" in query and query["action"][0] == "download":
-                self.send_header("200 Ok", { "Content-Type": "application/x-gtar", "Content-Disposition": "attachment; filename=directory.tar.bz2", "Transfer-Encoding": "chunked" })
+                archive_name = os.path.basename(path).replace('"', r'\"') or "download"
+                self.send_header("200 Ok", { "Content-Type": "application/x-gtar", "Content-Disposition": "attachment; filename=\"%s.tar.bz2\"" % archive_name, "Transfer-Encoding": "chunked" })
                 with ChunkWrapper(self.wfile) as wfile:
                     outfile = tarfile.open(mode="w|bz2", fileobj=wfile, format=tarfile.USTAR_FORMAT)
                     outfile.add(self.mapped_path, "")
