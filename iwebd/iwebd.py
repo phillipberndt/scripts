@@ -1067,7 +1067,7 @@ def format_size(size):
 def fd_copy(source_file, target_file, length):
     "Copy length bytes from source_file to target_file"
     def _read(amount):
-        if hasattr(source_file, "fileno"):
+        if type(source_file) is not socket._fileobject and hasattr(source_file, "fileno"):
             return os.read(source_file.fileno(), amount)
         else:
             return source_file.read(amount)
