@@ -713,7 +713,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                             filename = filename.group(1).replace(r'\"', '"')
                             self.logger.info("Received file %(filename)s", { "filename": filename })
                             if not "/" in filename:
-                                with open(filename, "w") as outfile:
+                                with open(os.path.join(self.mapped_path, filename), "w") as outfile:
                                     outfile.write(part.get_payload())
                     self.send_header("302 Found", { "Location": path, "Content-Length": 0 })
                     return
