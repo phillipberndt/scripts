@@ -723,7 +723,6 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     body { font-size: 12px; font-family: sans-serif; }
                     img { vertical-align: middle; }
                     ul, li { list-style-type: none; }
-                    ul { column-count: 5; -moz-column-count: 5; -webkit-column-count: 5; column-width: 250px; -moz-column-width: 250px; -webkit-column-width: 250px;}
                     a { font-weight: bold; }
                 </style><body><h1>Directory contents for %(path)s</h1><p>Directory: <a href="/">root</a> """ % { "path": xml_escape(urldecode(path)) } ]
 
@@ -746,16 +745,18 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 absname = os.path.join(self.mapped_path, name)
                 if os.path.isdir(absname):
                     if has_gtk:
-                        dirs.append("<li><img src='/.directory-icons/inode-directory'> <a href='%s'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
+                        dirs.append("<li><img src='/.directory-icons/inode-directory'> <a href='%s/'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
                     else:
-                        dirs.append("<li><a href='%s'>%s/</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
+                        dirs.append("<li><a href='%s/'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
                 else:
                     try:
                         file_mime_type = mimetypes.guess_type(absname)[0] or "application/octet-stream"
                         size = format_size(os.stat(absname).st_size)
                     except:
                         size = 0
-                    if has_gtk and gtk.icon_theme_get_default().has_icon(file_mime_type.replace("/", "-")):
+                    if has_gtk:
+                        if not gtk.icon_theme_get_default().has_icon(file_mime_type.replace("/", "-")):
+                            file_mime_type = "application-octet-stream"
                         files.append("<li><img src='/.directory-icons/%s'> <a href='%s'>%s</a> <em>%s</em></li>" % (file_mime_type.replace("/", "-"), xml_escape(os.path.join(base, name)), xml_escape(name), size))
                     else:
                         files.append("<li><a href='%s'>%s</a> <em>%s</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name), size))
