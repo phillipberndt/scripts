@@ -35,6 +35,7 @@ import tarfile
 from wsgiref.handlers import format_date_time
 
 # TODO ngrok support (?!)
+# TODO htaccess/mod_rewrite support for httpd
 
 try:
     import gtk
