@@ -1016,6 +1016,13 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
         if self.method.lower() not in ("get", "post"):
             self.send_error("405 Method not allowed")
+
+        if os.path.isdir(self.mapped_path):
+            for index_candidate in ("index.html", "index.htm", "index.php"):
+                candidate = os.path.join(self.mapped_path, index_candidate)
+                if os.path.isfile(candidate):
+                    self.mapped_path = candidate
+
         self.handle_request_for_file()
 
     def handle(self):
