@@ -709,7 +709,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     outfile.close()
                 return
 
-            if "write_access" in self.options and "content-type" in self.headers:
+            if "write_access" in self.options and self.options["write_access"] and "content-type" in self.headers:
                 body = StringIO.StringIO()
                 body.write("Content-Type: %s\r\n\r\n" % (self.headers["content-type"][0]))
                 self.read_http_body(body)
@@ -774,7 +774,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             data += dirs
             data += files
             data.append("</ul>")
-            if "write_access" in self.options:
+            if "write_access" in self.options and self.options["write_access"]:
                 data.append('<form method="post" enctype="multipart/form-data"><h2>Upload</h2><input type=file multiple name=file><input type=submit name=upload value="Upload"></form>')
             data.append("</body>")
             data = "\r\n".join(data)
