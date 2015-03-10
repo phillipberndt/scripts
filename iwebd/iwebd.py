@@ -1008,7 +1008,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     output.write(buf)
                     return True
             gtk.icon_theme_get_default().load_icon(self.path[18:], 32, 0).save_to_callback(send_data, "png", {}, None)
-            self.reply_with_file_like_object(output, output.pos, "image/png", "200 Ok")
+            self.reply_with_file_like_object(output, output.pos, "image/png", "200 Ok", { "Cache-Control": "public, max-age=31104000" })
             return
 
         self.mapped_path = self.map_url(self.path[1:])
