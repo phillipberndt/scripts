@@ -11,13 +11,11 @@ import atexit
 import base64
 import datetime
 import email
-import grp
 import hashlib
 import itertools
 import logging
 import mimetypes
 import os
-import pwd
 import re
 import shutil
 import signal
@@ -37,6 +35,13 @@ from wsgiref.handlers import format_date_time
 # TODO ngrok support (?!)
 # TODO htaccess/mod_rewrite support for httpd
 # TODO PATH_INFO support (i.e. /foo.cgi/bar/baz)
+
+try:
+    import grp
+    import pwd
+    has_pwd = True
+except ImportError:
+    has_pwd = False
 
 try:
     import gtk
@@ -239,8 +244,8 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 "r" if stat.st_mode & 00004 else "-",
                 "w" if stat.st_mode & 00002 else "-",
                 "x" if stat.st_mode & 00001 else "-",
-                pwd.getpwuid(stat.st_uid).pw_name,
-                grp.getgrgid(stat.st_gid).gr_name,
+                pwd.getpwuid(stat.st_uid).pw_name if has_pwd else "-",
+                grp.getgrgid(stat.st_gid).gr_name if has_pwd else "-",
                 stat.st_size,
                 mtime.strftime("%b"),
                 mtime.strftime("%d"),
