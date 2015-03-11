@@ -200,6 +200,8 @@ class FtpHandler(SocketServer.StreamRequestHandler):
         else:
             new_path = "%s/" % os.path.abspath(os.path.join(self.current_path, path))
         base_path = "%s/" % os.path.abspath(".")
+        if base_path == "//":
+            base_path = "/"
         if expect == "file":
             new_path = new_path[:-1]
             check = os.path.isfile
