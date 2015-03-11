@@ -213,6 +213,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 check = os.path.isfile
         else:
             check = os.path.isdir
+        self.log(logging.DEBUG, "Client asked for %(path)s, checking for %(what)s %(where)s", path=path, what=expect, where=new_path)
         if new_path[:len(base_path)] != base_path or (must_exist and not check(new_path)):
             self.reply("550 No such file or directory.")
             return False
