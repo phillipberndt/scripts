@@ -264,7 +264,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
             command = self.rfile.readline().strip()
             if not command:
                 break
-            self.log(logging.DEBUG, "Raw command: `%(command)s'", {"command": command })
+            self.log(logging.DEBUG, "Raw command: `%(command)s'", command=command)
             command = command.split(None, 1)
 
             # Authentication and unauthenticated commands
