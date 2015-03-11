@@ -1252,22 +1252,25 @@ def main():
     user = False
     password = False
 
-    parser = argparse.ArgumentParser("iwebd", description="Instant web services. Copyright (c) 2015, Phillip Berndt.", epilog="It is required to supply at least one of the server options.", add_help=False)
+    parser = argparse.ArgumentParser("iwebd", description="Instant web services. Copyright (c) 2015, Phillip Berndt.", epilog="You must supply at least one of the server options.", add_help=False)
     parser.add_argument("-f", nargs="?", default=False, type=hostportpair, help="Run ftpd", metavar="port")
     parser.add_argument("-h", nargs="?", default=False, type=hostportpair, help="Run httpd", metavar="port")
-    parser.add_argument("-H", nargs="?", default=False, type=hostportpair, help="Run httpsd", metavar="port")
+    if has_ssl:
+        parser.add_argument("-H", nargs="?", default=False, type=hostportpair, help="Run httpsd", metavar="port")
     parser.add_argument("-d", action="store_true", help="Activate webdav in httpd")
     parser.add_argument("-w", action="store_true", help="Activate write access")
     parser.add_argument("-c", action="store_true", help="Allow CGI in httpd")
-    parser.add_argument("-a", action="store_true", help="Announce services via Avahi")
+    if has_dbus:
+        parser.add_argument("-a", action="store_true", help="Announce services via Avahi")
     parser.add_argument("-p", help="Only allow authenticated access for user:password", metavar="user:password")
     parser.add_argument("-v", action="store_true", help="Be more verbose")
-    parser.add_argument("--ssl-cert", help="Use a custom SSL certificate (Default: Auto-generated)", metavar="file")
-    parser.add_argument("--ssl-key", help="Use a custom SSL keyfile (Default: Auto-generated)", metavar="file")
+    if has_ssl:
+        parser.add_argument("--ssl-cert", help="Use a custom SSL certificate (Default: Auto-generated)", metavar="file")
+        parser.add_argument("--ssl-key", help="Use a custom SSL keyfile (Default: Auto-generated)", metavar="file")
     parser.add_argument("--help", action="help", help="Display this help")
     options = vars(parser.parse_args(sys.argv[1:]))
 
-    if options["f"] is False and options["h"] is False and options["H"] is False:
+    if options["f"] is False and options["h"] is False and ("H" not in options or options["H"] is False):
         parser.print_help()
         parser.exit(0)
     if options["p"]:
@@ -1295,7 +1298,7 @@ def main():
         "cgi_handlers": cgi_handlers,
     }
 
-    if options["H"] is not False:
+    if "H" in options and options["H"] is not False:
         if options["ssl_cert"] or options["ssl_key"]:
             assert os.path.isfile(options["ssl_cert"])
             assert os.path.isfile(options["ssl_key"])
@@ -1308,7 +1311,7 @@ def main():
     http_variants = []
     if options["h"] is not False:
         http_variants.append(("HTTP", {}, options["h"] or ("", 1234), "http", "webdav"))
-    if options["H"] is not False:
+    if "H" in options and options["H"] is not False:
         if not has_ssl:
             raise ValueError("No SSL available.")
         http_variants.append(("HTTPS", {"ssl_wrap": ssl_key}, options["H"] or ("", 1234), "https", "webdavs"))
@@ -1319,7 +1322,7 @@ def main():
         server, httpd_port = setup_tcp_server(HttpHandler, port, actual_options)
         servers.append(server)
         logger.info("%(what)s server started on %(port)s", {"what": name, "port": ":".join(map(str, httpd_port))})
-        if options["a"]:
+        if "a" in options and options["a"]:
             create_avahi_group(avahi_name_http, httpd_port)
             if options["d"]:
                 user = user or "anonymous"
@@ -1329,7 +1332,7 @@ def main():
         server, ftpd_port = setup_tcp_server(FtpHandler, options["f"] or ("", 1234), server_options)
         servers.append(server)
         logger.info("%(what)s server started on %(port)s", {"what": "FTP", "port": ":".join(map(str, ftpd_port))})
-        if options["a"]:
+        if "a" in options and options["a"]:
             create_avahi_group("ftp", ftpd_port)
 
     wait_for_signal(servers)
