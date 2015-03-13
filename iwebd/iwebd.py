@@ -735,11 +735,13 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         except:
             self.method = "GET"
             self.path = "/"
+            self.request_uri = "/"
             self.http_version = "HTTP/1.1"
             self.send_error("400 Bad request", force_close=True)
             return False
         if self.http_version.lower() not in ("http/1.1", "http/1.0"):
             raise RuntimeError("Unknown HTTP version %s" % (self.http_version, ))
+        self.request_uri = self.path
         return True
 
     def read_http_headers(self):
@@ -780,7 +782,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
     def send_header(self, status, headers):
         "Send the headers of a reply."
-        self.log(logging.INFO, "%(status)s %(method)s %(path)s", status=status.split()[0], method=self.method, path=self.path)
+        if self.path != self.request_uri:
+            self.log(logging.INFO, "%(status)s %(method)s %(request_uri)s -> %(path)s", status=status.split()[0], method=self.method, request_uri=self.request_uri, path=self.path)
+        else:
+            self.log(logging.INFO, "%(status)s %(method)s %(path)s", status=status.split()[0], method=self.method, path=self.path)
 
         if "Host" not in headers:
             headers["Host"] = self.headers["host"][0] if "host" in self.headers else socket.gethostname()
@@ -858,11 +863,11 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 "QUERY_STRING": path.query,
                 "SCRIPT_NAME": path.path[:-len(self.path_info)-1] if self.path_info else path.path,
                 "PATH_INFO": self.path_info,
-                "REQUEST_URI": self.path,
+                "REQUEST_URI": self.request_uri,
                 "PATH_TRANSLATED": os.path.abspath(self.mapped_path),
                 "REMOTE_ADDR": self.request.getpeername()[0],
                 "CONTENT_TYPE": self.headers["content-type"][0] if "content-type" in self.headers else "",
-                "CONTENT_LENGTH": str(self.headers["content-length"][0]) if "content-length" in self.headers else "0"
+                "CONTENT_LENGTH": str(self.headers["content-length"][0]) if "content-length" in self.headers else "0",
         })
         for header in self.headers:
             environ["HTTP_%s" % header.upper().replace("-", "_")] = ", ".join(self.headers[header])
@@ -1208,6 +1213,66 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             return False
         return True
 
+    def handle_htaccess(self):
+        """When self.mapped_path is already set, check for .htaccess files that alter the request.
+        Currently, only partial mod_rewrite is available."""
+        path_components = [""] + self.mapped_path.split("/")[len(os.path.abspath(".").split("/")):]
+        path_candidate = []
+        for part in path_components:
+            if part:
+                path_candidate.append(part)
+            htaccess_file = os.path.join("/".join(path_candidate), ".htaccess")
+            if os.path.isfile(htaccess_file):
+                partial_request = "/".join(path_components[len(path_candidate):])
+                rewrite_engine_status = False
+                active_conds = []
+                with open(htaccess_file) as hta:
+                    for line in hta.readlines():
+                        if re.match("\s*RewriteEngine\s+On", line, re.I):
+                            rewrite_engine_status = True
+                        if rewrite_engine_status:
+                            cond_match = re.match("^\s*RewriteCond\s+(?P<test>\S+)\s+(?P<cond>\S+)", line, re.I)
+                            if cond_match:
+                                active_conds.append(cond_match)
+                                continue
+                            rule_match = re.match("^\s*RewriteRule\s+(?P<pattern>\S+)\s+(?P<subst>\S+)\s*(?:\[(?P<flags>[^\]+])\])?", line, re.I)
+                            if rule_match and re.search(rule_match.group("pattern"), partial_request):
+                                cond_failed = False
+                                for cond in active_conds:
+                                    if "-f" in cond.group("cond") and "request_filename" in cond.group("test").lower():
+                                        if os.path.isfile(self.mapped_path) == ("!" in cond.group("cond")):
+                                            cond_failed = True
+                                    else:
+                                        self.log(logging.DEBUG, "Unsupported RewriteCond in %(file)s: %(rule)s", file=htaccess_file, rule=cond.string.strip())
+                                active_conds = []
+                                if cond_failed:
+                                    continue
+                                new_partial = re.sub(rule_match.group("pattern"), rule_match.group("subst").replace("$", "\\"), partial_request)
+                                new_uri = "/".join(itertools.chain(("",), path_candidate, (new_partial, )))
+                                flags = rule_match.group("flags")
+                                if flags and "F" in flags:
+                                    self.send_error("403 Forbidden")
+                                    return False
+                                if flags and "G" in flags:
+                                    self.send_error("410 Gone")
+                                    return False
+                                if flags and "R" in flags:
+                                    if ":" not in new_uri:
+                                        new_uri = "/%s" % new_uri
+                                        self.send_error("302 Found", headers={"Location": new_uri})
+                                        return False
+                                self.path_info = ""
+                                self.path = new_uri
+                                self.mapped_path = self.map_url(new_uri)
+                                if not self.mapped_path:
+                                    self.send_error("403 Access denied")
+                                    return False
+                                if flags and "N" in flags:
+                                    return self.handle_htaccess()
+                                if flags and "L" in flags:
+                                    break
+        return True
+
     def handle_request(self):
         "Handle a single request."
         self.body_read = False
@@ -1243,6 +1308,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         self.mapped_path = self.map_url(self.path[1:])
         if not self.mapped_path:
             self.send_error("403 Access denied")
+            return
+
+        if not self.handle_htaccess():
             return
 
         if "dav_enabled" in self.options and self.options["dav_enabled"] and self.method.upper() in ("PUT", "MKCOL", "DELETE"):
