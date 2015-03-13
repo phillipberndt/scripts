@@ -533,6 +533,51 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
     """
 
+    DIRECTORY_ICONS = {
+        # Taken from Linux Mint / Gnome
+        "inode-directory": """
+            iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAA8ZJREFU
+            WIXtlr1uJEUUhb+qHnuFxROQ8AQLFoFlyYSEsAFC4lEQD0LAS5DxArbkyAQEyAHSCpCQg5UA+Wem
+            u+8fQXVX14yXxWYhYq9U011dPXVOnXtuVcObeBP/90ht5+zs7ExVPwRIKZFSGd69zznHarX65ujo
+            6LPXJbBqOyJycnJy8iDiFxcXn74u+BaB09PT7wEF9h7yx67r7Pz8PP5KpVeo513Xffv06dNnWwTc
+            /b3j42Mi4kHMDw8PV3//1ksjX15efjJ36iQpJa6urv7hnI+LWRGYTPjFV8++M7UP/o3JPZxwJyLK
+            /dyAcK/PSPzy9Zfn764AVO39jz/6nP3VE7q8IucVXepIuSOnvEwchrnhruUahpmiLpgJ6iNiI6qC
+            2Yho6ZfrgMrAoD0iA89//PkdmFKQUhoIDl5c/wQJUsrklEk5b8kVEXUV7oWMuVZCZqVvNrVpvD5z
+            QU1RGxBXqQQgRnc7SLkDgpwyOedCJGcSqYDiRGKStCgSMRNyPAyflHGmfswEdSJoiCimMgBkgCBG
+            NSG1+1JTPiQgRQFzI9yXFFTQAlTanCap4MtVEBsxHzeLAuGjmEAqMjtOeOAsJALHbJo4HA9FXXFr
+            JVYsDJvHQlCffbKkQExQlb4SiIhepCetDHUhJUg+gScgAicIL6u1MNx8WpGhtqxQJyJuVkBbcFc8
+            DBWFxKKAmW42w5r91KE+ApBzYz5KWc35NrNaEYWET8BS8mwyVYZVs7rPc0TxTkrrSkBtXPfjmrz3
+            BPGheMGr9QliMl4sZqsrWyrAXWuFuC8Gja0WuAc4DQGX201/y/5bCdERiEn5yQ9RQMMnd7cbjbdV
+            MIN7bXU8FhXNDHLcVgIi492mv2G/T/R6V+oCh/lYSNT7okbUyUplzGRsITMrNZPcagbOQuD67vc/
+            frt9wd4BiA3lBGMy4NYnQ1DOqmg8MZen16vXvlXAlpC7A3HTlCE3MvaoCWrSEEg78K0ntpUoK132
+            /2Vj2r234gG4rgQ87HrQoezhrkB7hi85mE/qcmTvEmiJtCosslcfeODeKOAWaxl6H2XMFjopn5qd
+            cflGCGJSgcYHO0pELEZtzDmHaahHUwVh9H0/6tCv952owMsu2KRhkuG+CrHl9FaJ3Y8cU1P3ZiNS
+            j0HErB/Har7FhDPw/DOrsF0R7HqC+8CVgLm7smzFpjGO/chm3UMlMOd+N2LLjLM3WiW2NbsfMjom
+            NlQC9PHDXerj7ubX8ZX/9Jc/fthXZPN+Dg/x57C9xD3gbaB75HyPDQduAPmPcR4WfwJ2hrgbCtSz
+            VQAAAABJRU5ErkJggg==
+        """,
+        "application-octet-stream": """
+            iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABHNCSVQICAgIfAhkiAAAA5pJREFU
+            WIXFl81OI0cQgL9uDx7/BCQbgzfriBMHDggph7xSHiIPkBsvkBfIU3DJNYdYnECGi80BO/GY9Q/M
+            n7tzWPeopz1jNiyrlDSaqu6a+q/qHqG15v8EzyBCiApQtde+EaRArLVeZwYIIfyrq6ufLy4uftnf
+            3//wLbUvFovH6+vrX4UQv2mtIwEI4MNwOPyr3W53DaMQ4l0V26kOgmB8cnLyI/DoARXgY6fT6Sql
+            csrfywitNUKIzIhOp9MFPgJ/m3w3tNY5Rlv5Ww2xvTa40QM0wCk423P7eS9wHTMGCEDaEbAN2mWA
+            4Tc8RS3trlm0BIQ0ulxGI3g8HrNcLnl4eCBJEtbrNaPR6LMEKZlMJiwWC0ajEWmaMplMWC6XGV3k
+            xEaXMFZgR8A1ZL1eI6WkXq8TRRGe5yGlLNwPwzCjG40GYRjmvHZ0SNsAYSu3caUUYRhSrVa/aN+l
+            XccsPBeBQjDMSilWqxW+7/P09EQcx8znc+I43tp36dfAdIF0PTN4r9fL5XBvb4+Dg4OMNvvmu16v
+            t+WAG/6NvHwKyrx36aI0lK2V1ZWtc6sGXCFJknB7e4tSaosGGA6HBEHAYDAgjuMt/h0G5bugKAIA
+            nudRqVSydUOb9krTFM/zaDQaPD8/U61Wc/y2LAeKu6AstGUCtdasVitqtVop/2sR2DlrgyAgiiJm
+            sxlxHGe0ea/Xa5RSzOdz6vU60+k020+SZFcEAITpAmFyanshhKDVatFut7O1drudo09PT3Ne+r5P
+            q9UqLVo3AsaAfNLY7oJC8wvOif/QBRXYUQPmiaKIfr+fVf1gMGAymdDv9wnDcIuO45h+v18oa1cX
+            lILv+7mqTpIkG0aLxWKLrlareJ5XGiEXskmolMpNNDeMBtI0ZT6f02w20Vpv0UA2A4rklB1G2Wlo
+            f6y15vHxkZeXl+ytlCJNU4IgoNlsZvR0OqXZbGZ84/GYMAxzA8kZTtKOQA7smX18fEy3m91VOT8/
+            z/G6dK1W4+joKJPjTsSyFAjba/uG89qNpwjsVJridSOL1YYC6zQ0ykxNfO2dsOhQ24DEGkQ5ZqPY
+            ML/XrbhIngQ0EN7d3X1yme3iectTNow2ukJAVzYG6NlsdnZ2dvb94eGhb1/JpZQ5XEpJpVLJcPtx
+            +d0fHCEE9/f3i8vLyz9ubm5+B/4Rm5B/B1wAPwE/vCneXw4PwJ/AtdZ6Kay87PH5b+X1i9zXQQQ8
+            a60TgH8Bz9Df3ibzcAYAAAAASUVORK5CYII=
+        """
+    }
+
     def log(self, lvl, msg, *args, **kwargs):
         kwargs.update({
             "ip": self.client_address[0],
@@ -762,22 +807,15 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     continue
                 absname = os.path.join(self.mapped_path, name)
                 if os.path.isdir(absname):
-                    if has_gtk:
-                        dirs.append("<li><img src='/.directory-icons/inode-directory' alt='directory'> <a href='%s/'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
-                    else:
-                        dirs.append("<li><a href='%s/'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
+                    dirs.append("<li><img src='/.directory-icons/inode-directory' alt='directory'> <a href='%s/'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
                 else:
                     try:
                         file_mime_type = mimetypes.guess_type(absname)[0] or "application/octet-stream"
                         size = format_size(os.stat(absname).st_size)
                     except:
                         size = 0
-                    if has_gtk:
-                        if not gtk.icon_theme_get_default().has_icon(file_mime_type.replace("/", "-")):
-                            file_mime_type = "application-octet-stream"
-                        files.append("<li><img src='/.directory-icons/%s' alt='%s'> <a href='%s'>%s</a> <em>%s</em></li>" % (file_mime_type.replace("/", "-"), file_mime_type, xml_escape(os.path.join(base, name)), xml_escape(name), size))
-                    else:
-                        files.append("<li><a href='%s'>%s</a> <em>%s</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name), size))
+                        file_mime_type = "application/octet-stream"
+                    files.append("<li><img src='/.directory-icons/%s' alt='%s'> <a href='%s'>%s</a> <em>%s</em></li>" % (file_mime_type.replace("/", "-"), file_mime_type, xml_escape(os.path.join(base, name)), xml_escape(name), size))
 
             data += dirs
             data += files
@@ -1005,12 +1043,19 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 self.send_error("401 Not Authorized", headers={ "WWW-Authenticate": [ digest_authentication_challenge, 'Basic realm="megad webserver"' ] })
                 return
 
-        if self.path.startswith("/.directory-icons/") and has_gtk:
+        if self.path.startswith("/.directory-icons/"):
+            load_icon = self.path[18:]
             output = StringIO.StringIO()
             def send_data(buf, data=None):
                     output.write(buf)
                     return True
-            gtk.icon_theme_get_default().load_icon(self.path[18:], 32, 0).save_to_callback(send_data, "png", {}, None)
+            if has_gtk:
+                icon_theme = gtk.icon_theme_get_default()
+                if not icon_theme.has_icon(load_icon):
+                    load_icon = "application-octet-stream"
+                icon_theme.load_icon(load_icon, 32, 0).save_to_callback(send_data, "png", {}, None)
+            else:
+                output.write(base64.b64decode(self.DIRECTORY_ICONS[load_icon if load_icon in self.DIRECTORY_ICONS else "application-octet-stream"]))
             self.reply_with_file_like_object(output, output.pos, "image/png", "200 Ok", { "Cache-Control": "public, max-age=31104000" })
             return
 
