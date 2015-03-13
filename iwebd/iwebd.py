@@ -34,7 +34,6 @@ from wsgiref.handlers import format_date_time
 
 # TODO ngrok support (?!)
 # TODO htaccess/mod_rewrite support for httpd
-# TODO PATH_INFO support (i.e. /foo.cgi/bar/baz)
 
 try:
     import grp
@@ -690,8 +689,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 "SERVER_PORT": str(self.request.getsockname()[1]),
                 "REQUEST_METHOD": self.method,
                 "QUERY_STRING": path.query,
-                "SCRIPT_NAME": path.path,
-                "PATH_INFO": "",
+                "SCRIPT_NAME": path.path[:-len(self.path_info)-1] if self.path_info else path.path,
+                "PATH_INFO": self.path_info,
                 "REQUEST_URI": self.path,
                 "PATH_TRANSLATED": os.path.abspath(self.mapped_path),
                 "REMOTE_ADDR": self.request.getpeername()[0],
@@ -827,9 +826,6 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             size = len(data)
             file = StringIO.StringIO(data)
         else:
-            if "allow_cgi" in self.options and self.options["allow_cgi"] and (os.path.splitext(self.mapped_path)[-1][1:] in self.options["cgi_handlers"] or os.access(self.mapped_path, os.X_OK)):
-                self.handle_request_for_cgi()
-                return
             mime_type = mimetypes.guess_type(self.mapped_path)[0]
             stat = os.stat(self.mapped_path)
             size = stat.st_size
@@ -988,6 +984,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         self.active_nonces[nonce] = { "time": time.time(), "used_nc": [] }
         return nonce
 
+    def is_path_cgi_candidate(self, mapped_path):
+        "Check if a file should be served as a CGI file"
+        return "allow_cgi" in self.options and self.options["allow_cgi"] and os.path.isfile(mapped_path) and (os.path.splitext(mapped_path)[-1][1:] in self.options["cgi_handlers"] or os.access(mapped_path, os.X_OK))
+
     def handle_request(self):
         "Handle a single request."
         self.body_read = False
@@ -1059,6 +1059,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self.reply_with_file_like_object(output, output.pos, "image/png", "200 Ok", { "Cache-Control": "public, max-age=31104000" })
             return
 
+        self.path_info = ""
         self.mapped_path = self.map_url(self.path[1:])
         if not self.mapped_path:
             self.send_error("403 Access denied")
@@ -1069,8 +1070,25 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             return
 
         if not os.path.exists(self.mapped_path):
-            self.send_error("404 Not found")
-            return
+            if "allow_cgi" in self.options and self.options["allow_cgi"]:
+                # This could be a request for /cgi-file/some/path/info
+                path_components = self.path[1:].split("/")
+                path_candidate = []
+                while len(path_components) > 0:
+                    path_candidate.append(path_components.pop(0))
+                    mapped_candidate = self.map_url("/".join(path_candidate))
+                    if os.path.isfile(mapped_candidate) and self.is_path_cgi_candidate(mapped_candidate):
+                        self.mapped_path = mapped_candidate
+                        self.path_info = "/".join(path_components)
+                        if "?" in self.path_info:
+                            self.path_info = self.path_info[:self.path_info.index("?")]
+                        break
+                else:
+                    self.send_error("404 Not found")
+                    return
+            else:
+                self.send_error("404 Not found")
+                return
 
         if "dav_enabled" in self.options and self.options["dav_enabled"] and self.method.upper() in ("OPTIONS", "PROPFIND", "MOVE", "COPY"):
             self.handle_dav_request()
@@ -1086,7 +1104,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 if os.path.isfile(candidate):
                     self.mapped_path = candidate
 
-        self.handle_request_for_file()
+        if self.is_path_cgi_candidate(self.mapped_path):
+            self.handle_request_for_cgi()
+        else:
+            self.handle_request_for_file()
 
     def handle(self):
         self.log(logging.DEBUG, "Accepted connection")
