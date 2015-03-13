@@ -988,6 +988,51 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         "Check if a file should be served as a CGI file"
         return "allow_cgi" in self.options and self.options["allow_cgi"] and os.path.isfile(mapped_path) and (os.path.splitext(mapped_path)[-1][1:] in self.options["cgi_handlers"] or os.access(mapped_path, os.X_OK))
 
+    def handle_authentication(self, options_user, options_pass):
+        "Return True if the user could be authenticated, or False, in which case the request has already been finished."
+        authentication_ok = False
+        is_stale = False
+        if "authorization" in self.headers:
+            method, param = self.headers["authorization"][0].split(None, 1)
+            if method.lower() == "basic":
+                user, password = base64.b64decode(param).split(":", 1)
+                if user == options_user and password == options_pass:
+                    authentication_ok = True
+            elif method.lower() == "digest":
+                params = {}
+                for partial_param in param.split(","):
+                    name, value = partial_param.strip().split("=", 1)
+                    if value[0] == '"' and value[-1] == '"':
+                        value = value[1:-1]
+                    params[name] = value
+                if params["nonce"] in self.active_nonces and self.active_nonces[params["nonce"]]["time"] > time.time() - 600:
+                    data = self.active_nonces[params["nonce"]]
+                    ha1 = hashlib.md5("%s:%s:%s" % (params["username"], params["realm"], options_pass)).hexdigest()
+                    ha2 = hashlib.md5("%s:%s" % (self.method, params["uri"])).hexdigest()
+                    response = hashlib.md5("%s:%s:%s:%s:%s:%s" % (ha1, params["nonce"], params["nc"], params["cnonce"], params["qop"], ha2)).hexdigest()
+                    self.logger.debug("Digest authentication: Excpected %(expect)s, received %(received)s", {"expect": response, "received": str(params)})
+                    if params["nc"] not in data["used_nc"] and response == params["response"] and params["username"] == options_user:
+                        # Testing for nc > last_nc (base 16!) suffices in
+                        # theory, but due to the thread-bases approach I
+                        # use here it doesn't. Also, note that there's a race
+                        # condition here.
+                        data["used_nc"].append(params["nc"])
+                        authentication_ok = True
+                else:
+                    is_stale = True
+        if not authentication_ok:
+            digest_authentication_challenge = ", ".join([
+               'Digest realm="megad webserver"',
+               'qop="auth"',
+               'nonce="{nonce}"',
+               'opaque="0"',
+            ]).format(nonce=self.generate_nonce())
+            if is_stale:
+                digest_authentication_challenge += ", stale=TRUE"
+            self.send_error("401 Not Authorized", headers={ "WWW-Authenticate": [ digest_authentication_challenge, 'Basic realm="megad webserver"' ] })
+            return False
+        return True
+
     def handle_request(self):
         "Handle a single request."
         self.body_read = False
@@ -1001,46 +1046,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
         if "user" in self.options and self.options["user"]:
             # Authenticate the user
-            authentication_ok = False
-            is_stale = False
-            if "authorization" in self.headers:
-                method, param = self.headers["authorization"][0].split(None, 1)
-                if method.lower() == "basic":
-                    user, password = base64.b64decode(param).split(":", 1)
-                    if user == self.options["user"] and password == self.options["pass"]:
-                        authentication_ok = True
-                elif method.lower() == "digest":
-                    params = {}
-                    for partial_param in param.split(","):
-                        name, value = partial_param.strip().split("=", 1)
-                        if value[0] == '"' and value[-1] == '"':
-                            value = value[1:-1]
-                        params[name] = value
-                    if params["nonce"] in self.active_nonces and self.active_nonces[params["nonce"]]["time"] > time.time() - 600:
-                        data = self.active_nonces[params["nonce"]]
-                        ha1 = hashlib.md5("%s:%s:%s" % (params["username"], params["realm"], self.options["pass"])).hexdigest()
-                        ha2 = hashlib.md5("%s:%s" % (self.method, params["uri"])).hexdigest()
-                        response = hashlib.md5("%s:%s:%s:%s:%s:%s" % (ha1, params["nonce"], params["nc"], params["cnonce"], params["qop"], ha2)).hexdigest()
-                        self.logger.debug("Digest authentication: Excpected %(expect)s, received %(received)s", {"expect": response, "received": str(params)})
-                        if params["nc"] not in data["used_nc"] and response == params["response"] and params["username"] == self.options["user"]:
-                            # Testing for nc > last_nc (base 16!) suffices in
-                            # theory, but due to the thread-bases approach I
-                            # use here it doesn't. Also, note that there's a race
-                            # condition here.
-                            data["used_nc"].append(params["nc"])
-                            authentication_ok = True
-                    else:
-                        is_stale = True
-            if not authentication_ok:
-                digest_authentication_challenge = ", ".join([
-                   'Digest realm="megad webserver"',
-                   'qop="auth"',
-                   'nonce="{nonce}"',
-                   'opaque="0"',
-                ]).format(nonce=self.generate_nonce())
-                if is_stale:
-                    digest_authentication_challenge += ", stale=TRUE"
-                self.send_error("401 Not Authorized", headers={ "WWW-Authenticate": [ digest_authentication_challenge, 'Basic realm="megad webserver"' ] })
+            if not self.handle_authentication(self.options["user"], self.options["pass"]):
                 return
 
         if self.path.startswith("/.directory-icons/"):
