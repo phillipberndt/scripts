@@ -532,6 +532,61 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
     """
 
+    POST_FORM_HTML = """
+        <form method="post" enctype="multipart/form-data"><h2>Upload</h2><input type=file multiple name=file><input type=submit name=upload value="Upload"></form>
+        <div id="upload_progress"><br/></div>
+        <script type="text/javascript">
+            function upload(file) {
+                var progress = document.createElement("div");
+                progress.innerHTML = "<strong>" + file.name.replace(/</g, "&lt;").replace(/&/g, "&amp;") + "</strong>: <span>0%</span>";
+                document.querySelector("#upload_progress").appendChild(progress);
+
+                var xhr = new XMLHttpRequest();
+                xhr.open("POST", "", true);
+                xhr.onload = function() {
+                    progress.querySelector("span").innerHTML = "done";
+                    setTimeout(function() {
+                        progress.remove();
+                    }, 5000);
+                };
+                xhr.onprogress = function(e) {
+                    var percent = 100 * e.loaded / e.total;
+                    progress.querySelector("span").innerHTML = Math.round(percent, 2) + "%";
+                }
+                xhr.onerror = function() {
+                    progress.querySelector("span").innerHTML = "failed";
+                }
+                var data = new FormData();
+                data.append("file", file, file.name);
+                data.append("upload", "Upload");
+                xhr.send(data);
+            }
+
+            document.querySelector("form").addEventListener("submit", function(e) {
+                e.preventDefault();
+                var files = document.querySelector("input[name=file]").files;
+                for(var i=0; i<files.length; i++) {
+                    upload(files[i]);
+                }
+            });
+
+            document.querySelector("body").addEventListener("drop", function(e) {
+                e.stopPropagation();
+                e.preventDefault();
+                var files = e.dataTransfer.files;
+                for(var i=0; i<files.length; i++) {
+                    upload(files[i]);
+                }
+            });
+
+            document.querySelector("body").addEventListener("dragover", function(e) {
+                e.stopPropagation();
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+            });
+        </script>
+    """
+
     DIRECTORY_ICONS = {
         # Taken from Linux Mint / Gnome
         "inode-directory": """
@@ -820,7 +875,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             data += files
             data.append("</ul>")
             if "write_access" in self.options and self.options["write_access"]:
-                data.append('<form method="post" enctype="multipart/form-data"><h2>Upload</h2><input type=file multiple name=file><input type=submit name=upload value="Upload"></form>')
+                data.append(self.POST_FORM_HTML)
             data.append("</body>")
             data = "\r\n".join(data)
             size = len(data)
