@@ -538,7 +538,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         <script type="text/javascript">
             function upload(file) {
                 var progress = document.createElement("div");
-                progress.innerHTML = "<strong>" + file.name.replace(/</g, "&lt;").replace(/&/g, "&amp;") + "</strong>: <span>0%</span>";
+                progress.innerHTML = "<strong>" + file.name.replace(/</g, "&lt;").replace(/&/g, "&amp;") + "</strong>: <span><progress>0%</progress></span>";
                 document.querySelector("#upload_progress").appendChild(progress);
 
                 var xhr = new XMLHttpRequest();
@@ -549,9 +549,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                         progress.remove();
                     }, 5000);
                 };
-                xhr.onprogress = function(e) {
+                xhr.upload.onprogress = function(e) {
+                console.log(e);
                     var percent = 100 * e.loaded / e.total;
-                    progress.querySelector("span").innerHTML = Math.round(percent, 2) + "%";
+                    progress.querySelector("span").innerHTML = "<progress value=" + (percent / 100) + ">" + Math.round(percent, 2) + "%</progress>";
                 }
                 xhr.onerror = function() {
                     progress.querySelector("span").innerHTML = "failed";
