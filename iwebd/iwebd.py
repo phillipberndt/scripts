@@ -123,7 +123,10 @@ class ReusableServer(SocketServer.ThreadingTCPServer):
             """
             if self.allow_reuse_address:
                 self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            pyprivbind.bind(self.socket, self.server_address)
+            try:
+                pyprivbind.bind(self.socket, self.server_address)
+            except:
+                self.socket.bind(self.server_address)
             self.server_address = self.socket.getsockname()
 
 class FtpHandler(SocketServer.StreamRequestHandler):
