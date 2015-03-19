@@ -4,8 +4,10 @@ cdef extern from "libprivbind.h":
 import socket as _sock
 import os
 
-__all__ = [ "bind", "gensocket" ]
+__all__ = [ "bind", "gensocket", "AF_INET", "AF_INET6", "SOCK_STREAM", "SOCK_DGRAM" ]
 __doc__ = "Bind sockets to a privileged port"
+
+AF_INET, AF_INET6, SOCK_STREAM, SOCK_DGRAM = _sock.AF_INET, _sock.AF_INET6, _sock.SOCK_STREAM, _sock.SOCK_DGRAM
 
 def bind(socket, address):
     """
@@ -28,8 +30,6 @@ def bind(socket, address):
 
     host, port = address
     port = int(port)
-    if not host:
-        host = "0.0.0.0"
 
     retval = privbind(socket.fileno(), host, port)
     if retval == 255:
@@ -37,20 +37,25 @@ def bind(socket, address):
     elif retval == 254:
         raise IOError("Failed to bind socket to port %(port)d: Access denied (create /etc/pyprivbind/%(port)d and make it executable)" % { "port": port })
     elif retval == 253:
+        raise IOError("Failed to bind socket to port %(port)d: Socket has invalid address family)" % { "port": port })
+    elif retval == 252:
+        raise RuntimeError("Failed to bind socket to port %d: Invalid host address" % port)
+    elif retval == 251:
         raise RuntimeError("Failed to bind socket to port %d: Failed to run helper program `libprivbind-helper'" % port)
     elif retval != 0:
         raise RuntimeError("Failed to bind socket to port %d: error %d (%s)" % (port, retval, os.strerror(retval)))
 
-def gensocket(address, type=_sock.SOCK_STREAM):
+def gensocket(address, family=_sock.AF_INET, type=_sock.SOCK_STREAM):
     """
         Create a TCP o UDP socket bound to a given port
 
         Parameters:
             address A host and port number tuple for the AF_INET family (tcp/udp)
+            family  Address family. Must be AF_INET or AF_INET6
             type    The type of the socket to create, i.e. SOCK_STREAM or SOCK_DGRAM
 
     """
-    socket = _sock.socket(type=type)
+    socket = _sock.socket(family=family, type=type)
     socket.setsockopt(_sock.SOL_SOCKET, _sock.SO_REUSEADDR, 1)
 
     bind(socket, address)

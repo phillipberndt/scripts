@@ -24,6 +24,15 @@ int main() {
 	int fd = atoi(fd_str);
 	int port = atoi(port_str);
 
+	int sock_domain;
+	int sock_domain_length = sizeof(sock_domain);
+	if(getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &sock_domain, &sock_domain_length) != 0) {
+		exit(-3);
+	}
+	if(sock_domain != AF_INET && sock_domain != AF_INET6) {
+		exit(-3);
+	}
+
 	char grant_file[255];
 	if(snprintf(grant_file, 255, "/etc/privbind/%d", port) > 255) {
 		exit(-1);
@@ -38,8 +47,10 @@ int main() {
 	}
 
 	struct addrinfo *address_info;
-	if(getaddrinfo(address, port_reprint, NULL, &address_info) != 0) {
-		exit(-1);
+	struct addrinfo hints = { AI_PASSIVE, sock_domain, 0, 0, 0, NULL, NULL, NULL };
+	int addrinfo_rv = getaddrinfo(address[0] == 0 ? NULL : address, port_reprint, &hints, &address_info);
+	if(addrinfo_rv != 0) {
+		exit(-4);
 	}
 
 	if(bind(fd, address_info->ai_addr, address_info->ai_addrlen) == 0) {

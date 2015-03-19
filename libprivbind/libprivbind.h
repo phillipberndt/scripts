@@ -27,7 +27,7 @@ int privbind(int sockfd, char *address, in_port_t port) {
 		setenv("SOCKET_PORT", port_str, 1);
 		setenv("SOCKET_ADDRESS", address, 1);
 		execlp("libprivbind-helper", "libprivbind-helper", NULL);
-		exit(-3);
+		exit(-5);
 	}
 
 	waitpid(child_pid, &status, 0);
