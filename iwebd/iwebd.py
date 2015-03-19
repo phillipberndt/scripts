@@ -1482,17 +1482,17 @@ def main():
         servers.append(server)
         logger.info("%(what)s server started on %(port)s", {"what": name, "port": ":".join(map(str, httpd_port))})
         if "a" in options and options["a"]:
-            create_avahi_group(avahi_name_http, httpd_port)
+            create_avahi_group(avahi_name_http, httpd_port[1])
             if options["d"]:
                 user = user or "anonymous"
-                create_avahi_group(avahi_name_webdav, httpd_port, [ "u=%s" % user, "path=/" ])
+                create_avahi_group(avahi_name_webdav, httpd_port[1], [ "u=%s" % user, "path=/" ])
 
     if options["f"] is not False:
         server, ftpd_port = setup_tcp_server(FtpHandler, options["f"] or ("", default_port("ftpd")), server_options)
         servers.append(server)
         logger.info("%(what)s server started on %(port)s", {"what": "FTP", "port": ":".join(map(str, ftpd_port))})
         if "a" in options and options["a"]:
-            create_avahi_group("ftp", ftpd_port)
+            create_avahi_group("ftp", ftpd_port[1])
 
     wait_for_signal(servers)
 
