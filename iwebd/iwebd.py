@@ -1272,7 +1272,7 @@ def setup_tcp_server(handler_class, base_port=("", 1234), options={}):
             if counter > 100:
                 raise
     threading.Thread(target=server.serve_forever).start()
-    return server, (base_port[0] or "*", base_port[1] + counter)
+    return server, server.socket.getsockname()[:2]
 
 def setup_tcp_server_socket(base_port=1234):
     "Setup a TCP socket on a variable path. Returns the instance and the actual port as a tuple."
