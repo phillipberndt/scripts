@@ -12,12 +12,11 @@
 struct sockaddr_in addr;
 
 int main() {
-	char port_reprint[6];
 	char *fd_str = getenv("SOCKET_FD");
 	char *port_str = getenv("SOCKET_PORT");
 	char *address = getenv("SOCKET_ADDRESS");
 
-	if(!fd_str || !port_str) {
+	if(!fd_str || !port_str || !address) {
 		printf("This program is intended to be run from libprivbind.\n");
 		exit(-1);
 	}
@@ -33,7 +32,11 @@ int main() {
 		exit(-2);
 	}
 
-	snprintf(port_reprint, 6, "%d", port);
+	char port_reprint[7];
+	if(snprintf(port_reprint, 7, "%d", port) > 7) {
+		exit(-1);
+	}
+
 	struct addrinfo *address_info;
 	if(getaddrinfo(address, port_reprint, NULL, &address_info) != 0) {
 		exit(-1);
