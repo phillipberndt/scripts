@@ -31,6 +31,7 @@ import uuid
 import tarfile
 
 from wsgiref.handlers import format_date_time
+from functools import partial
 
 # TODO ngrok support (?!)
 # TODO htaccess/mod_rewrite support for httpd
@@ -70,6 +71,12 @@ try:
 except:
     has_ssl = False
 
+try:
+    import pyprivbind
+    has_pyprivbind = True
+except:
+    has_pyprivbind = False
+
 class SSLKey(object):
     "Tiny container for certificate information that can create self-signed temporary certificates on the fly"
     def __init__(self, cert=False, key=False):
@@ -103,6 +110,18 @@ class ReusableServer(SocketServer.ThreadingTCPServer):
         if "ssl_wrap" in self.__options:
             sock = ssl.wrap_socket(sock, self.__options["ssl_wrap"].key, self.__options["ssl_wrap"].cert, True, ssl_version = ssl.PROTOCOL_TLSv1 | ssl.PROTOCOL_SSLv23)
         return sock, client_address
+
+    if has_pyprivbind:
+        def server_bind(self):
+            """Called by constructor to bind the socket.
+
+            May be overridden.
+
+            """
+            if self.allow_reuse_address:
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            pyprivbind.bind(self.socket, self.server_address)
+            self.server_address = self.socket.getsockname()
 
 class FtpHandler(SocketServer.StreamRequestHandler):
     """
@@ -1339,7 +1358,7 @@ def natsort_key(string):
     "Return a key for natural sorting of a string argument"
     return [ int(s) if s.isdigit() else s for s in re.split(r"\d+", string) ]
 
-def hostportpair(string):
+def hostportpair(service, string):
     "Parse a host/port specifier"
     if ":" in string:
         host, port = string.split(":")
@@ -1348,7 +1367,7 @@ def hostportpair(string):
         elif host in ("lo", "l"):
             host = "localhost"
         if port == "":
-            port = 1234
+            port = default_port(service)
         return host, int(port)
     else:
         return "", int(string)
@@ -1379,15 +1398,21 @@ class LogFormatter(logging.Formatter):
         out = msg % record.args
         return "%s\033[%dm%s\033[0m" % (base, col, out)
 
+def default_port(service):
+    if has_pyprivbind:
+        return { "httpd": 80, "ftpd": 21, "httpsd": 443 }[service]
+    else:
+        return 1234
+
 def main():
     user = False
     password = False
 
     parser = argparse.ArgumentParser("iwebd", description="Instant web services. Copyright (c) 2015, Phillip Berndt.", epilog="You must supply at least one of the server options.", add_help=False)
-    parser.add_argument("-f", nargs="?", default=False, type=hostportpair, help="Run ftpd", metavar="port")
-    parser.add_argument("-h", nargs="?", default=False, type=hostportpair, help="Run httpd", metavar="port")
+    parser.add_argument("-f", nargs="?", default=False, type=partial(hostportpair, "ftpd"), help="Run ftpd", metavar="port")
+    parser.add_argument("-h", nargs="?", default=False, type=partial(hostportpair, "httpd"), help="Run httpd", metavar="port")
     if has_ssl:
-        parser.add_argument("-H", nargs="?", default=False, type=hostportpair, help="Run httpsd", metavar="port")
+        parser.add_argument("-H", nargs="?", default=False, type=partial(hostportpair, "httpsd"), help="Run httpsd", metavar="port")
     parser.add_argument("-d", action="store_true", help="Activate webdav in httpd")
     parser.add_argument("-w", action="store_true", help="Activate write access")
     parser.add_argument("-c", action="store_true", help="Allow CGI in httpd")
@@ -1441,11 +1466,11 @@ def main():
 
     http_variants = []
     if options["h"] is not False:
-        http_variants.append(("HTTP", {}, options["h"] or ("", 1234), "http", "webdav"))
+        http_variants.append(("HTTP", {}, options["h"] or ("", default_port("httpd")), "http", "webdav"))
     if "H" in options and options["H"] is not False:
         if not has_ssl:
             raise ValueError("No SSL available.")
-        http_variants.append(("HTTPS", {"ssl_wrap": ssl_key}, options["H"] or ("", 1234), "https", "webdavs"))
+        http_variants.append(("HTTPS", {"ssl_wrap": ssl_key}, options["H"] or ("", default_port("httpsd")), "https", "webdavs"))
 
     for name, additional_options, port, avahi_name_http, avahi_name_webdav in http_variants:
         actual_options = server_options.copy()
@@ -1460,7 +1485,7 @@ def main():
                 create_avahi_group(avahi_name_webdav, httpd_port, [ "u=%s" % user, "path=/" ])
 
     if options["f"] is not False:
-        server, ftpd_port = setup_tcp_server(FtpHandler, options["f"] or ("", 1234), server_options)
+        server, ftpd_port = setup_tcp_server(FtpHandler, options["f"] or ("", default_port("ftpd")), server_options)
         servers.append(server)
         logger.info("%(what)s server started on %(port)s", {"what": "FTP", "port": ":".join(map(str, ftpd_port))})
         if "a" in options and options["a"]:
