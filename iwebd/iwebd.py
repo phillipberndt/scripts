@@ -13,6 +13,7 @@ import datetime
 import email
 import hashlib
 import itertools
+import locale
 import logging
 import mimetypes
 import os
@@ -22,13 +23,13 @@ import signal
 import socket
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
 import traceback
 import urlparse
 import uuid
-import tarfile
 
 from wsgiref.handlers import format_date_time
 from functools import partial
@@ -1442,6 +1443,8 @@ def main():
     logging.getLogger().handlers = []
     logging.getLogger().addHandler(log_handler)
     logger = logging.getLogger("main")
+
+    locale.setlocale(locale.LC_ALL, "C")
 
     cgi_handlers = determine_available_cgi_handlers()
 
