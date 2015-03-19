@@ -100,6 +100,8 @@ class ReusableServer(SocketServer.ThreadingTCPServer):
     def __init__(self, server_address, RequestHandlerClass, options={}):
         """Constructor.  May be extended, do not override."""
         self.__options = options
+        if ":" in server_address[0]:
+            self.address_family = socket.AF_INET6
         SocketServer.ThreadingTCPServer.__init__(self, server_address, RequestHandlerClass)
 
     def finish_request(self, request, client_address):
@@ -1362,7 +1364,9 @@ def natsort_key(string):
 def hostportpair(service, string):
     "Parse a host/port specifier"
     if ":" in string:
-        host, port = string.split(":")
+        parts = string.split(":")
+        port = parts[-1]
+        host = ":".join(parts[:-1])
         if host in ("*", "a", "all"):
             host = ""
         elif host in ("lo", "l"):
