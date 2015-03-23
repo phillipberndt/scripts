@@ -695,7 +695,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         previous_header = None
         while True:
             line = self.rfile.readline()
-            line = line[:-2 if line[-2] == "\r" else -1]
+            line = line[:-2 if len(line) > 1 and line[-2] == "\r" else -1]
             if not line:
                 return
             if line[0].isspace():
@@ -731,7 +731,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         self.log(logging.INFO, "%(status)s %(method)s %(path)s", status=status.split()[0], method=self.method, path=self.path)
 
         if "Host" not in headers:
-            headers["Host"] = self.headers["host"][0] if "host" in self.headers else socket.gethostbyname()
+            headers["Host"] = self.headers["host"][0] if "host" in self.headers else socket.gethostname()
         if "Connection" not in headers:
             headers["Connection"] = self.headers["connection"][0] if "connection" in self.headers else ("Keep-Alive" if self.http_version.lower() == "http/1.1" else "Close")
         headers_list = []
