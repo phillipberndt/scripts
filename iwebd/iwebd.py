@@ -100,6 +100,8 @@ class ReusableServer(SocketServer.ThreadingTCPServer):
     def __init__(self, server_address, RequestHandlerClass, options={}):
         """Constructor.  May be extended, do not override."""
         self.__options = options
+        if not server_address[0]:
+            server_address = ("::0" if socket.has_ipv6 else "0.0.0.0", server_address[1])
         if ":" in server_address[0]:
             self.address_family = socket.AF_INET6
         SocketServer.ThreadingTCPServer.__init__(self, server_address, RequestHandlerClass)
