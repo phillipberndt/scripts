@@ -80,6 +80,7 @@ except:
 
 class SSLKey(object):
     "Tiny container for certificate information that can create self-signed temporary certificates on the fly"
+    # TODO maybe add ca: Generate CA like cert below, but then leave the -x509 to create req and sign using `openssl x509 -req -in req -CA foo -CAkey bar -CAcreateserial -out crt`
     def __init__(self, cert=False, key=False):
         if (bool(cert) ^ bool(key)):
             raise ValueError("Either certificate or key not given")
