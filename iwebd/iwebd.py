@@ -1453,6 +1453,7 @@ def main():
         parser.add_argument("--ssl-cert", help="Use a custom SSL certificate (Default: Auto-generated)", metavar="file")
         parser.add_argument("--ssl-key", help="Use a custom SSL keyfile (Default: Auto-generated)", metavar="file")
     parser.add_argument("--help", action="help", help="Display this help")
+    parser.add_argument("--root", help="root directory to serve from", metavar="directory")
     options = vars(parser.parse_args(sys.argv[1:]))
 
     if options["f"] is False and options["h"] is False and ("H" not in options or options["H"] is False):
@@ -1484,6 +1485,13 @@ def main():
         "allow_cgi": options["c"],
         "cgi_handlers": cgi_handlers,
     }
+
+    if options["root"]:
+        try:
+            os.chdir(options["root"])
+            logger.info("Serving from %(dir)s", { "dir": os.getcwd() })
+        except:
+            parser.error("root directory must exist")
 
     if "H" in options and options["H"] is not False:
         if options["ssl_cert"] or options["ssl_key"]:
