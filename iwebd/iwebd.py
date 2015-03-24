@@ -548,12 +548,31 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     logger  = logging.getLogger("http")
 
     SERVER_MESSAGE_PREAMBLE = """<!DOCTYPE HTML><meta charset=utf8><title>%(title)s</title>
-        <style type="text/css">
+        <style>
             body { font-size: 14px; font-family: sans-serif; }
             img { vertical-align: middle; }
-            ul, li { list-style-type: none; }
+            ul { list-style-type: none; }
             a { font-weight: bold; }
         </style>
+        <script>
+            document.addEventListener("DOMContentLoaded", function() {
+                if(document.querySelector("li")) {
+                    var max = Math.max.apply(Math.max, [ for (x of document.querySelectorAll("li")) x.offsetHeight ]);
+                    var height = document.body.offsetHeight;
+                    var sty = document.styleSheets[0].cssRules[2].style;
+                    if(typeof sty.MozColumns != "undefined") {
+                        var i;
+                        for(i=2; i<10; i++) {
+                            sty.MozColumns = i;
+                            if(Math.max.apply(Math.max, [ for (x of document.querySelectorAll("li")) x.offsetHeight ]) > max) break;
+                            if(height == document.body.offsetHeight) break;
+                            height = document.body.offsetHeight;
+                        }
+                        sty.MozColumns = i - 1;
+                    }
+                }
+            });
+        </script>
         <body>
         <h1>%(title)s</h1>
 
@@ -562,7 +581,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     POST_FORM_HTML = """
         <form method="post" enctype="multipart/form-data"><h2>Upload</h2><input type=file multiple name=file><input type=submit name=upload value="Upload"></form>
         <div id="upload_progress"><br/></div>
-        <script type="text/javascript">
+        <script>
             function upload(file) {
                 var progress = document.createElement("div");
                 progress.innerHTML = "<strong>" + file.name.replace(/</g, "&lt;").replace(/&/g, "&amp;") + "</strong>: <span><progress>0%</progress></span>";
