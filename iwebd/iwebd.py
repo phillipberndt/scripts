@@ -558,19 +558,11 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         <script>
             document.addEventListener("DOMContentLoaded", function() {
                 if(document.querySelector("li")) {
-                    var max = Math.max.apply(Math.max, [ for (x of document.querySelectorAll("li")) x.offsetHeight ]);
-                    var height = document.body.offsetHeight;
-                    var sty = document.styleSheets[0].cssRules[2].style;
-                    if(typeof sty.MozColumns != "undefined") {
-                        var i;
-                        for(i=2; i<10; i++) {
-                            sty.MozColumns = i;
-                            if(Math.max.apply(Math.max, [ for (x of document.querySelectorAll("li")) x.offsetHeight ]) > max) break;
-                            if(height == document.body.offsetHeight) break;
-                            height = document.body.offsetHeight;
-                        }
-                        sty.MozColumns = i - 1;
-                    }
+                    var ul = document.querySelector("ul");
+                    var maxWidth = [ for(l of document.querySelectorAll("li"))
+                        [ for (x of l.childNodes) x.offsetWidth ].reduce((x, y) => isNaN(y) ? x : x+y, 0)
+                    ].reduce((x, y) => x > y ? x : y, 0)
+                    ul.style.columnWidth = ul.style.MozColumnWidth = Math.floor(maxWidth + 15) + "px";
                 }
             });
         </script>
@@ -888,7 +880,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     return
 
             mime_type = "text/html; charset=utf8"
-            title = "Directory contents for %s" % xml_escape(urldecode(path))
+            title = "Directory contents for %s" % xml_escape(os.path.basename(urldecode(path)[:-1]) or "/")
             data = [ self.SERVER_MESSAGE_PREAMBLE % { "title": title }, '<p>Directory: <a href="/">root</a>' ]
 
             full_dirspec = "/"
