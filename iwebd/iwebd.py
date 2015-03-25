@@ -1004,6 +1004,15 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         start = 0
         headers = additional_headers.copy()
         if size > 0:
+            if size > 1024 and size < 102400 and has_gzip and "accept-encoding" in self.headers and "gzip" in (", ".join(self.headers["accept-encoding"])).lower():
+                # Compress small files on the fly
+                compressed = StringIO.StringIO()
+                with GzipWrapper(mode="w", fileobj=compressed) as out:
+                    out.write(file.read(size))
+                size = compressed.tell()
+                compressed.seek(0)
+                file = compressed
+                headers["Content-Encoding"] = "gzip"
             if "range" in self.headers:
                 req_range_type, req_range = self.headers["range"][0].split("=")
                 range_start, range_end = req_range.split("-")
