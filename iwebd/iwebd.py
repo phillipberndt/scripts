@@ -729,7 +729,14 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         line = self.rfile.readline()
         if not line:
             return False
-        self.method, self.path, self.http_version = line.split()
+        try:
+            self.method, self.path, self.http_version = line.split()
+        except:
+            self.method = "GET"
+            self.path = "/"
+            self.http_version = "HTTP/1.1"
+            self.send_error("400 Bad request", force_close=True)
+            return False
         if self.http_version.lower() not in ("http/1.1", "http/1.0"):
             raise RuntimeError("Unknown HTTP version %s" % (self.http_version, ))
         return True
@@ -777,7 +784,20 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         if "Host" not in headers:
             headers["Host"] = self.headers["host"][0] if "host" in self.headers else socket.gethostname()
         if "Connection" not in headers:
-            headers["Connection"] = self.headers["connection"][0] if "connection" in self.headers else ("Keep-Alive" if self.http_version.lower() == "http/1.1" else "Close")
+            if self.http_version.lower() == "http/1.0":
+                if "connection" not in self.headers or self.headers["connection"][0] != "keep-alive":
+                    headers["Connection"] = "Close"
+                    self.do_keep_alive = False
+                else:
+                    headers["Connection"] = "Keep-Alive"
+            else:
+                if "connection" not in self.headers or self.headers["connection"][0] != "close":
+                    pass
+                else:
+                    headers["Connection"] = "Close"
+                    self.do_keep_alive = False
+        else:
+            self.do_keep_alive = headers["Connection"].lower() == "keep-alive"
         headers_list = []
         for name, value in headers.items():
             if type(value) is list:
@@ -1181,7 +1201,6 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         "Handle a single request."
         self.body_read = False
         if not self.read_http_method():
-            self.rfile.close()
             return
         self.headers = {}
         self.read_http_headers()
@@ -1262,6 +1281,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     def handle(self):
         self.log(logging.DEBUG, "Accepted connection")
         while not self.rfile.closed:
+            self.do_keep_alive = True
             try:
                 self.handle_request()
             except socket.error:
@@ -1273,9 +1293,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 except socket.error:
                     pass
                 break
-            if "connection" in self.headers:
-                if self.headers["connection"][0].lower() != "keep-alive":
-                    break
+            if not self.do_keep_alive:
+                break
             elif not self.http_version or self.http_version.lower() == "http/1.0":
                 break
 
