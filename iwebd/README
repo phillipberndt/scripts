@@ -25,6 +25,7 @@ iwebd's features include
    * Fancy directory listings with icons if you have pyGTK
    * Download directories as archive files
    * Upload files
+   * Transparent compression (gzip)
  * Avahi announcement of both in the local network
  * Multi-threaded
 

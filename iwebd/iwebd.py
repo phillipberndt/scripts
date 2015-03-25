@@ -12,6 +12,7 @@ import base64
 import datetime
 import email
 import hashlib
+import io
 import itertools
 import locale
 import logging
@@ -77,6 +78,12 @@ try:
     has_pyprivbind = True
 except:
     has_pyprivbind = False
+
+try:
+    import gzip
+    has_gzip = True
+except:
+    has_gzip = False
 
 class SSLKey(object):
     "Tiny container for certificate information that can create self-signed temporary certificates on the fly"
@@ -502,19 +509,28 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 self.reply("502 Command not implemented.")
                 continue
 
-class ChunkWrapper(object):
+class ChunkWrapper(io.BufferedIOBase):
     "Context-Wrapper around a file-like object that intercepts calls to write() and outputs chunks instead"
     def __init__(self, fileobj):
        self.fileobj = fileobj
+       self.finalized = False
 
     def __enter__(self):
+        if hasattr(self.fileobj, "__enter__"):
+            self.fileobj.__enter__()
         return self
 
     def __exit__(self, type, value, traceback):
-        self.fileobj.write("0\r\n\r\n")
+        if not self.finalized:
+            self.fileobj.write("0\r\n\r\n")
+            self.finalized = True
+        if hasattr(self.fileobj, "__exit__"):
+            self.fileobj.__exit__(type, value, traceback)
 
     def write(self, data):
-        self.fileobj.write("%x\r\n%s\r\n" % (len(data), data))
+        assert not self.finalized
+        if data:
+            self.fileobj.write("%x\r\n%s\r\n" % (len(data), data))
 
     def flush(self):
         self.fileobj.flush()
@@ -527,7 +543,23 @@ class ChunkWrapper(object):
             self.write("%s\n" % line)
 
     def close(self):
-        pass
+        if not self.finalized:
+            self.fileobj.write("0\r\n\r\n")
+            self.finalized = True
+
+class GzipWrapper(gzip.GzipFile):
+    "Context-Wrapper around a GzipFile that passes through the underlying file's context wrapper"
+    def __enter__(self):
+        if hasattr(self.fileobj, "__enter__"):
+            self.fileobj.__enter__()
+        return self
+
+    def __exit__(self, type, value, traceback):
+        fileobj = self.fileobj
+        self.flush()
+        self.close()
+        if hasattr(fileobj, "__exit__"):
+            fileobj.__exit__(type, value, traceback)
 
 class HttpHandler(SocketServer.StreamRequestHandler):
     """
@@ -766,6 +798,25 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         self.send_header(error_message, headers)
         self.wfile.write(body)
 
+    def begin_chunked_reply(self, status, headers):
+        assert "Transfer-Encoding" not in headers
+        assert "Content-Length" not in headers
+        wrapper = [ ChunkWrapper ]
+        te_header = [ "chunked" ]
+        # A much better way to handle this would be to either react on the
+        # TE header being present (which none UA sends, afaik) and then use
+        # gzip as a transfer-encoding. Some clients accept the same encodings
+        # for transfer-encoding as they do for accept-encoding, so we could simply
+        # assume that, but sadly, Firefox is not among them.
+        # (Doing so would allow us to use gzip for known content-length's, too)
+        if "accept-encoding" in self.headers:
+            if has_gzip and "gzip" in ", ".join(self.headers["accept-encoding"]):
+                wrapper.append(lambda f: GzipWrapper(mode="w", fileobj=f))
+                headers["Content-Encoding"] = "gzip"
+        headers["Transfer-Encoding"] = ", ".join(te_header)
+        self.send_header(status, headers)
+        return reduce(lambda x, y: y(x), wrapper, self.wfile if self.method.lower() != "head" else StringIO.StringIO())
+
     def handle_request_for_cgi(self):
         "Like handle_request_for_file, but run the target file as a CGI script"
         file_extension = os.path.splitext(self.mapped_path)[-1][1:]
@@ -834,9 +885,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self.send_header(status, headers)
             fd_copy(cgi_process.stdout, self.wfile, int(cgi_headers["content-length"]))
         else:
-            headers["Transfer-Encoding"] = "chunked"
-            self.send_header(status, headers)
-            with ChunkWrapper(self.wfile) as wfile:
+            with self.begin_chunked_reply(status, headers) as wfile:
                 fd_copy(cgi_process.stdout, wfile, -1)
         cgi_process.terminate()
 
@@ -849,8 +898,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
             if "action" in query and query["action"][0] == "download":
                 archive_name = os.path.basename(path).replace('"', r'\"') or "download"
-                self.send_header("200 Ok", { "Content-Type": "application/x-gtar", "Content-Disposition": "attachment; filename=\"%s.tar.bz2\"" % archive_name, "Transfer-Encoding": "chunked" })
-                with ChunkWrapper(self.wfile) as wfile:
+                headers = { "Content-Type": "application/x-gtar", "Content-Disposition": "attachment; filename=\"%s.tar.bz2\"" % archive_name }
+                with self.begin_chunked_reply("200 Ok", headers) as wfile:
                     outfile = tarfile.open(mode="w|bz2", fileobj=wfile, format=tarfile.GNU_FORMAT)
                     outfile.add(self.mapped_path, "")
                     outfile.close()
@@ -951,16 +1000,16 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             file.seek(start)
             headers["Accept-Ranges"] = "bytes"
             headers["Content-Length"] = size
-        else:
-            headers["Transfer-Encoding"] = "chunked"
-
         headers["Content-Type"] = mime_type
-        self.send_header(status, headers)
-        if self.method.lower() != "head":
-            if size < 0:
-                with ChunkWrapper(self.wfile) as wfile:
-                    fd_copy(file, wfile, size)
-            else:
+
+        if self.method.lower() == "head":
+            self.send_header(status, headers)
+        elif size < 0:
+            with self.begin_chunked_reply(status, headers) as wfile:
+                fd_copy(file, wfile, size)
+        else:
+            self.send_header(status, headers)
+            if self.method.lower() != "head":
                 fd_copy(file, self.wfile, size)
         file.close()
 
@@ -1196,7 +1245,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self.read_http_body()
             return
 
-        if self.method.lower() not in ("get", "post"):
+        if self.method.lower() not in ("get", "post", "head"):
             self.send_error("405 Method not allowed")
 
         if os.path.isdir(self.mapped_path):
