@@ -1238,7 +1238,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
 def xml_escape(string):
     "Escape special XML/HTML characters"
-    return string.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    return string.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&apos;")
 
 def format_size(size):
     "Format a human-readable file size"
