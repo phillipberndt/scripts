@@ -1008,6 +1008,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 # Compress small files on the fly
                 compressed = StringIO.StringIO()
                 with GzipWrapper(mode="w", fileobj=compressed) as out:
+                    file.seek(0)
                     out.write(file.read(size))
                 size = compressed.tell()
                 compressed.seek(0)
