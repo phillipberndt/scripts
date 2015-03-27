@@ -1381,7 +1381,7 @@ def setup_tcp_server_socket(base_port=1234):
                 raise
     return server, base_port + counter
 
-def wait_for_signal(servers):
+def wait_for_signal(servers, extra_thread_count=0, script_file_name=__file__):
     """Infinite loop that intercepts <C-c>, closes the servers if it catches it
     once and kills the process the second time."""
     signal_count = [ 0 ]
@@ -1394,20 +1394,28 @@ def wait_for_signal(servers):
                 server.socket.shutdown(socket.SHUT_RDWR)
                 server.socket.close()
                 del server.socket
+            if signum == signal.SIGUSR1:
+                time.sleep(.5)
+                print
+                os.closerange(3, os.sysconf("SC_OPEN_MAX") or 1024)
+                os.execv(script_file_name, sys.argv)
+                sys.exit(1)
         else:
             logging.warn("Second signal received. Killing the process.")
             os.closerange(3, 255)
             os.kill(os.getpid(), signal.SIGKILL)
     oldint = signal.signal(signal.SIGINT, _signal_handler)
     oldhup = signal.signal(signal.SIGHUP, _signal_handler)
+    oldusr = signal.signal(signal.SIGUSR1, _signal_handler)
     while signal_count[0] == 0:
         time.sleep(3600)
-    while threading.active_count() > 1:
+    while threading.active_count() > 1 + extra_thread_count:
         print "\r\033[JWaiting for %d remaining conntections to terminate." % (threading.active_count() - 1, ),
         sys.stdout.flush()
         time.sleep(1)
     signal.signal(signal.SIGINT, oldint)
     signal.signal(signal.SIGHUP, oldhup)
+    signal.signal(signal.SIGUSR1, oldusr)
 
 def create_avahi_group(service, port, text=[]):
     """Register a server with the local Avahi daemon. `service' must be one of
@@ -1504,6 +1512,20 @@ def default_port(service):
     else:
         return 1234
 
+def autoreload(main_pid, watch_file_name):
+    import pyinotify
+    logger = logging.getLogger("autoreload")
+    def _handle(e):
+        logger.info("Reloading due to write to %(self)s", { "self": __file__ })
+        while True:
+            os.kill(main_pid, signal.SIGUSR1)
+            time.sleep(2)
+    manager = pyinotify.WatchManager()
+    manager.add_watch(watch_file_name, pyinotify.EventsCodes.FLAG_COLLECTIONS["OP_FLAGS"]["IN_CLOSE_WRITE"])
+    notifier = pyinotify.Notifier(manager, _handle)
+    logger.info("autoreload active")
+    notifier.loop()
+
 def main():
     user = False
     password = False
@@ -1557,6 +1579,7 @@ def main():
         "cgi_handlers": cgi_handlers,
     }
 
+    script_file_name = os.path.abspath(__file__)
     if options["root"]:
         try:
             os.chdir(options["root"])
@@ -1573,6 +1596,7 @@ def main():
             ssl_key = SSLKey()
 
     servers = []
+    extra_thread_count = 0
 
     http_variants = []
     if options["h"] is not False:
@@ -1601,7 +1625,18 @@ def main():
         if "a" in options and options["a"]:
             create_avahi_group("ftp", ftpd_port[1])
 
-    wait_for_signal(servers)
+    if servers and options["v"]:
+        try:
+            import pyinotify
+        except:
+            logging.getLogger("autoreload").debug("pyinotify unavailable. Not running autoreload thread.")
+        else:
+            ar_thread = threading.Thread(target=autoreload, args=(os.getpid(), script_file_name,))
+            ar_thread.daemon = True
+            ar_thread.start()
+            extra_thread_count += 1
+
+    wait_for_signal(servers, extra_thread_count, script_file_name)
 
 if __name__ == '__main__':
     main()
