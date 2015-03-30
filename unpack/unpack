@@ -332,9 +332,12 @@ class MAKESELFFile(filetype): # {{{
 			if byte != "\t" and byte != "\r" and byte != "\n" and (ord(byte) < 32 or ord(byte) > 126):
 				archive.seek(-1, 1)
 				break
-		compressionType = re.search(r"Compression: (\S+)", scriptData)
+		compressionType = re.search('COMPRESS="([^"]+)"', scriptData)
 		if compressionType == None:
-			sout("bad", "Failed to extract compression type")
+			compressionType = re.search(r"Compression: (\S+)", scriptData)
+			if compressionType == None:
+				sout("bad", "Failed to extract compression type")
+				return False
 		compressionType = compressionType.group(1)
 		if compressionType == "Unix" or compressionType == "gzip":
 			flags = "z"
@@ -343,7 +346,7 @@ class MAKESELFFile(filetype): # {{{
 		else:
 			sout("bad", "This compression type is not supported right now.")
 		# Unpack
-		targetPipe = subprocess.Popen("tar %sx %s -C %r" % (flags, params, destination), shell=true, stdin=subprocess.PIPE)
+		targetPipe = subprocess.Popen("tar %sx %s -C %r" % (flags, params, destination), shell=True, stdin=subprocess.PIPE)
 		while True:
 			data = archive.read(1024)
 			if not data:
