@@ -451,6 +451,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 if not target_file:
                     continue
                 self.rename_target = target_file
+                self.reply("350 Requested file action pending further information.")
                 continue
             elif command[0] == "RNTO":
                 if not self.rename_target:
