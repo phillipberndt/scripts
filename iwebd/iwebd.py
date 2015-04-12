@@ -548,19 +548,20 @@ class ChunkWrapper(io.BufferedIOBase):
             self.fileobj.write("0\r\n\r\n")
             self.finalized = True
 
-class GzipWrapper(gzip.GzipFile):
-    "Context-Wrapper around a GzipFile that passes through the underlying file's context wrapper"
-    def __enter__(self):
-        if hasattr(self.fileobj, "__enter__"):
-            self.fileobj.__enter__()
-        return self
+if has_gzip:
+    class GzipWrapper(gzip.GzipFile):
+        "Context-Wrapper around a GzipFile that passes through the underlying file's context wrapper"
+        def __enter__(self):
+            if hasattr(self.fileobj, "__enter__"):
+                self.fileobj.__enter__()
+            return self
 
-    def __exit__(self, type, value, traceback):
-        fileobj = self.fileobj
-        self.flush()
-        self.close()
-        if hasattr(fileobj, "__exit__"):
-            fileobj.__exit__(type, value, traceback)
+        def __exit__(self, type, value, traceback):
+            fileobj = self.fileobj
+            self.flush()
+            self.close()
+            if hasattr(fileobj, "__exit__"):
+                fileobj.__exit__(type, value, traceback)
 
 class HttpHandler(SocketServer.StreamRequestHandler):
     """
