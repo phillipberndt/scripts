@@ -261,8 +261,9 @@ def readline_timout(query, default, timeout=0, expect=None):
     except _TimeoutError:
         print
         return default
-    signal.alarm(0)
-    signal.signal(signal.SIGALRM, _old)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, _old)
 
 def is_executable(file_name):
     for path in os.environ["PATH"].split(":"):
