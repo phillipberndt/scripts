@@ -38,18 +38,18 @@ class OnPIDExit(OnEvent):
             if not processes:
                 raise ValueError("No process matches `%s'" % parameter)
             if len(processes) > 1:
-               status(1, "PID", "Multiple choices: ")
+               status(1, "exit", "Multiple choices: ")
                for pid, proc in processes.items():
                    print "      %04s %s" % (pid, proc)
             pid_list = map(int, processes.keys())
-            status(0, "PID", "Waiting for any of %d processes to exit" % len(pid_list))
+            status(0, "exit", "Waiting for any of %d processes to exit" % len(pid_list))
         self.pid_list = pid_list
 
     def wait_for_event(self):
         while True:
             for pid in self.pid_list:
                 if not OnPIDExit.is_alive(pid):
-                    status(0, "PID", "PID %d exited" % pid, True)
+                    status(0, "exit", "PID %d exited" % pid, True)
                     return
             time.sleep(1)
 # }}}
@@ -71,7 +71,7 @@ if has_pyinotify:
             files = glob.glob(parameter)
             for file_name in files:
                 self.wm.add_watch(file_name, pyinotify.IN_CLOSE_WRITE, rec=True)
-            status(0, "Inotify", "Watching %d files" % len(files))
+            status(0, "inotify", "Watching %d files" % len(files))
 
         def wait_for_event(self):
             notifier = pyinotify.Notifier(self.wm)
@@ -79,7 +79,7 @@ if has_pyinotify:
             notifier.check_events()
             notifier.read_events()
             path = notifier._sys_proc_fun(notifier._eventq[0]).pathname
-            status(0, "Inotify", "%s updated" % path, True)
+            status(0, "inotify", "%s updated" % path, True)
             return path
 # }}}
 # Network throughput {{{
@@ -105,13 +105,13 @@ class NetworkThroughput(OnEvent):
         self.nbytes = NetworkThroughput.get_bytes()
         self.time = time.time()
         time.sleep(1)
-        status(0, "Network Throughput", "Startup throughput is %2.2f kiB/s" % (self.get_throughput() / 1024, ))
+        status(0, "network", "Startup throughput is %2.2f kiB/s" % (self.get_throughput() / 1024, ))
 
     def wait_for_event(self):
         while True:
             time.sleep(10)
             throughput = self.get_throughput()
-            status(0, "Network Throughput", "Throughput is %2.2f kiB/s" % (throughput, ), True)
+            status(0, "network", "Throughput is %2.2f kiB/s" % (throughput / 1024, ), True)
             if throughput < self.threshold:
                 break
 # }}}
@@ -139,7 +139,7 @@ class CPUUsage(OnEvent):
         self.threshold = float(parameter)
         self.stat = CPUUsage.get_stat()
         time.sleep(1)
-        status(0, "CPU usage", "Startup CPU usage is %2.2f%%" % (self.get_usage(),))
+        status(0, "cpu", "Startup CPU usage is %2.2f%%" % (self.get_usage(),))
 
     def wait_for_event(self):
         while True:
@@ -148,7 +148,7 @@ class CPUUsage(OnEvent):
                 usage = self.get_usage()
             except ZeroDivisionError:
                 continue
-            status(0, "CPU usage", "CPU usage is %2.2f%%" % (usage,), True)
+            status(0, "cpu", "CPU usage is %2.2f%%" % (usage,), True)
             if usage < self.threshold:
                 break
 # }}}
