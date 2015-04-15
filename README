@@ -126,3 +126,9 @@ Contents:
   on an access control list in /etc, with a Python module to access the
   functionality. With this, pyprivbind.gensocket(80) will return a
   socket.socket() bound to the HTTP-port.
+
+* on
+
+  Wait for some kind and event and then execute a command. Event types include
+  inotify events (file changes), network throughput measurements, or that a certain
+  process exits.
