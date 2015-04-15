@@ -5,6 +5,8 @@ import glob
 import os
 import re
 import signal
+import socket
+import struct
 import subprocess
 import sys
 import time
@@ -124,6 +126,61 @@ class NetworkThroughput(OnEvent):
             status(0, "network", "Throughput is %2.2f kiB/s" % (throughput / 1024, ), True)
             if throughput < self.threshold:
                 break
+# }}}
+# Socket connection {{{
+class SocketConnection(OnEvent):
+    DESCRIPTION = "Network connection to host is closed"
+    PREFIX = "tcp"
+    PARAMETER_DESCRIPTION = "remote host"
+
+    @staticmethod
+    def get_connections():
+        with open("/proc/net/tcp") as tcp_file:
+            for line in tcp_file.readlines():
+                data = line.split()
+                if data[3] == "01": # TCP_ESTABLISHED
+                    host, port = data[2].split(":")
+                    port = int(port, 16)
+                    ip = socket.inet_ntoa(struct.pack("@I", int(host, 16)))
+                    yield ip, port
+        with open("/proc/net/tcp6") as tcp6_file:
+            for line in tcp6_file.readlines():
+                data = line.split()
+                if data[3] == "01": # TCP_ESTABLISHED
+                    host, port = data[2].split(":")
+                    port = int(port, 16)
+                    ip = socket.inet_ntop(socket.AF_INET6, struct.pack("@IIII", int(host[:4], 16), int(host[4:8], 16), int(host[8:12], 16), int(host[12:], 16)))
+                    yield ip, port
+
+    def __init__(self, parameter):
+        via = ""
+        if re.match("^[0-9\.:]+$", parameter):
+            self.ip = parameter
+        else:
+            try:
+                ips = socket.gethostbyaddr("xx" + parameter)[2]
+            except socket.gaierror:
+                ips = []
+            for ip in ips:
+                if ip in (x[0] for x in SocketConnection.get_connections()):
+                    via = "via DNS resolution"
+                    self.ip = ip
+                    break
+            else:
+                for ip, port in self.get_connections():
+                    host = socket.gethostbyaddr(ip)
+                    if parameter in host[0]:
+                        via = "reversely via %s:%d" % (host[0], port)
+                        self.ip = ip
+                        break
+                else:
+                    raise ValueError("No open connection to %s found" % parameter)
+        status(0, "tcp", "Waiting for connection(s) to %s to be closed%s" % (self.ip, (" (found %s)" % via) if via else ""))
+
+    def wait_for_event(self):
+        while self.ip in (x[0] for x in SocketConnection.get_connections()):
+            time.sleep(1)
+
 # }}}
 # CPU usage {{{
 class CPUUsage(OnEvent):
