@@ -154,7 +154,9 @@ if __name__ == '__main__':
         instance = handler(parameter)
         instance.wait_for_event()
         if "-k" in opts and proc:
-            proc.kill()
+            if proc.poll() is None:
+                print "Info: Killing old action instance %d" % proc.pid
+                proc.kill()
         if is_executable(action[0]):
             proc = subprocess.Popen(action)
         else:
