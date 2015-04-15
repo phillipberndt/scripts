@@ -4,6 +4,7 @@ import getopt
 import glob
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -38,10 +39,19 @@ class OnPIDExit(OnEvent):
             if not processes:
                 raise ValueError("No process matches `%s'" % parameter)
             if len(processes) > 1:
-               status(1, "exit", "Multiple choices: ")
-               for pid, proc in processes.items():
-                   print "      %04s %s" % (pid, proc)
-            pid_list = map(int, processes.keys())
+                status(1, "exit", "Multiple choices: ")
+                for pid, proc in processes.items():
+                    print "       %05s %s" % (pid, proc)
+                while True:
+                    which = readline_timout("Which process do you want?", "all", 20, "^[0-9]+$")
+                    if which == "all" or which in processes:
+                        break
+                if which != "all":
+                    pid_list = [ int(which) ]
+                else:
+                    pid_list = map(int, processes.keys())
+            else:
+                pid_list = [ int(processes.keys()[0]) ]
             status(0, "exit", "Waiting for any of %d processes to exit" % len(pid_list))
         self.pid_list = pid_list
 
@@ -175,6 +185,27 @@ def status(level, component, line, is_update=False):
         col = "31"
     up = "" if not is_update else "\033[1F\033[K"
     print "%s[\033[%sm%s\033[0m] %s" % (up, col, component, line)
+
+def readline_timout(query, default, timeout=0, expect=None):
+    class _TimeoutError(Exception):
+        pass
+    def _raise(*args):
+        raise _TimeoutError()
+    _old = signal.signal(signal.SIGALRM, _raise)
+    try:
+        while True:
+            signal.alarm(timeout)
+            data = raw_input("\007\033[1m%s\033[0m [%s, %ds timeout]: " % (query, default, timeout)).strip()
+            if not data:
+                return default
+            if not expect or re.match(expect, data):
+                return data
+            print "\033[1F\033[K",
+    except _TimeoutError:
+        print
+        return default
+    signal.alarm(0)
+    signal.signal(signal.SIGALRM, _old)
 
 def is_executable(file_name):
     for path in os.environ["PATH"].split(":"):
