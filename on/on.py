@@ -14,7 +14,7 @@ import time
 class OnEvent(object):
     DESCRIPTION = "sample description"
     PREFIX = "sample"
-    PARAMETER_DESCRIPTION = "file"
+    PARAMETER_DESCRIPTION = None
 
     def __init__(self, parameter):
         pass
@@ -219,6 +219,57 @@ class CPUUsage(OnEvent):
             if usage < self.threshold:
                 break
 # }}}
+# Whistling {{{
+try:
+    import alsaaudio
+    has_alsa = True
+except:
+    has_alsa = False
+try:
+    import numpy
+    has_numpy = True
+except:
+    has_numpy = False
+if has_alsa and has_numpy:
+    class Whistle(OnEvent):
+        DESCRIPTION = "Detect whistling on the primary microphone"
+        PREFIX = "whistle"
+
+        def __init__(self, parameter):
+            self.pcm = alsaaudio.PCM(alsaaudio.PCM_CAPTURE)
+            self.pcm.setformat(alsaaudio.PCM_FORMAT_FLOAT_LE)
+            self.pcm.setrate(16000)
+            self.pcm.setchannels(1)
+            status(0, "whistle", "Waiting for a whistle")
+
+        def get_center_freq(self):
+            data = []
+            for i in range(50):
+                length, sdata = self.pcm.read()
+                data.append(numpy.fromstring(sdata, dtype='float'))
+            data = numpy.hstack(data)
+            data = data * numpy.hanning(data.size)
+            fdata = numpy.fft.rfft(data)
+            freqs = numpy.fft.rfftfreq(data.size, d=1./16000)
+            A = numpy.log10(max(fdata)).real
+            f = freqs[numpy.argmax(fdata)]
+            return f, A
+
+        def wait_for_event(self):
+            while True:
+                f, A = self.get_center_freq()
+                if A > -7:
+                    if f < 1e3:
+                        status(0, "whistle", "Center frequency %04.2f Hz is uninteresting" % f, True)
+                    else:
+                        time.sleep(.1)
+                        f2, A2 = self.get_center_freq()
+                        if abs(f - f2) > .5e3:
+                            status(1, "whistle", "No whistle, %04.2f Hz fits but too short" % f, True)
+                        else:
+                            status(0, "whistle", "Got a whistle at %04.2f Hz with amplitude %03.2f" % (f, A), True)
+                            return True
+# }}}
 
 def print_help():
     print "Execute a program once a certain event occurs"
@@ -230,7 +281,7 @@ def print_help():
     print "  -w   Wait for action to complete before running it again"
     print
     print "Event types:"
-    for cls in OnEvent.__subclasses__():
+    for cls in sorted(OnEvent.__subclasses__(), key=lambda x: x.PREFIX):
         print "  %-20s %s" % ("%s:<%s>" % (cls.PREFIX, cls.PARAMETER_DESCRIPTION) if cls.PARAMETER_DESCRIPTION else cls.PREFIX, cls.DESCRIPTION)
 
 def status(level, component, line, is_update=False):
@@ -276,7 +327,7 @@ def main():
         opts, args = getopt.getopt(sys.argv[1:], "krw")
         opts = dict(opts)
         event = args[0]
-        parameter = ""
+        parameter = None
         if ":" in event:
             event, parameter = event.split(":", 1)
         action = args[1:]
