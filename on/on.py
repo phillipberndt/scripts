@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # encoding: utf-8
 import getopt
+import glob
 import os
 import re
 import subprocess
@@ -63,7 +64,8 @@ if has_pyinotify:
 
         def __init__(self, parameter):
             self.wm = pyinotify.WatchManager()
-            self.wm.add_watch(parameter, pyinotify.IN_CLOSE_WRITE, rec=True)
+            for file_name in glob.glob(parameter):
+                self.wm.add_watch(file_name, pyinotify.IN_CLOSE_WRITE, rec=True)
 
         def wait_for_event(self):
             notifier = pyinotify.Notifier(self.wm)
