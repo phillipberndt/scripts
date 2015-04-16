@@ -1,0 +1,9 @@
+#compdef on
+
+_on() {
+	_arguments '-k[Kill old action]' '-r[Repeat action]' '-w[Wait for action to complete]' \
+		':action:(cpu: exit: inotify: network: tcp: whistle)' \
+		':command:_path_commands' '*::arguments:_normal'
+}
+
+_on "$@"
