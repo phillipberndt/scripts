@@ -1532,7 +1532,7 @@ def urldecode(string):
 
 def natsort_key(string):
     "Return a key for natural sorting of a string argument"
-    return [ int(s) if s.isdigit() else s for s in re.split(r"\d+", string) ]
+    return [ int(s) if s.isdigit() else s for s in re.split(r"(\d+)", string) ]
 
 def hostportpair(service, string):
     "Parse a host/port specifier"
