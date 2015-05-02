@@ -14,6 +14,7 @@ import email
 import hashlib
 import io
 import itertools
+import json
 import locale
 import logging
 import mimetypes
@@ -22,6 +23,7 @@ import re
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import tarfile
@@ -29,6 +31,7 @@ import tempfile
 import threading
 import time
 import traceback
+import urllib
 import urlparse
 import uuid
 
@@ -84,6 +87,12 @@ try:
     has_gzip = True
 except:
     has_gzip = False
+
+try:
+    import pyinotify
+    has_pyinotify = True
+except:
+    has_pyinotify = False
 
 class SSLKey(object):
     "Tiny container for certificate information that can create self-signed temporary certificates on the fly"
@@ -563,6 +572,66 @@ if has_gzip:
             if hasattr(fileobj, "__exit__"):
                 fileobj.__exit__(type, value, traceback)
 
+class EmbedLivereloadWrapper(io.IOBase):
+    "Wrapper around a HTML file that embeds a LiveReload JS into the file"
+    EMBED_CODE = """<script>document.write('<script src="/.live-reload/livereload.js?host=' + (location.host || 'localhost').split(':')[0] + '&port=/.live-reload"><' + '/script>');</script>"""
+
+    def __init__(self, fileobj):
+        self.fileobj = fileobj
+        self.buffer = StringIO.StringIO()
+        self._reached_eof = False
+        self._fileobj_len = None
+        self._injected = False
+
+    def _fill_buffer(self, pos=10240, whence=io.SEEK_CUR):
+        if self._reached_eof:
+            return
+        if whence == io.SEEK_CUR:
+            reach = self.buffer.tell() + pos
+        elif whence == io.SEEK_SET:
+            reach = pos
+        elif whence == io.SEEK_END:
+            if self._fileobj_len is None:
+                pos = self.fileobj.tell()
+                self.fileobj.seek(0, io.SEEK_END)
+                self._fileobj_len = self.fileobj.tell()
+                self.fileobj.seek(pos, io.SEEK_SET)
+            reach = self._fileobj_len - pos
+        buf_pos = self.buffer.tell()
+        remain = reach - len(self.buffer.getvalue())
+        if remain > 0:
+            data = self.fileobj.read(remain)
+            self.buffer.write(data)
+            if len(data) < remain:
+                self._reached_eof = True
+            if not self._injected:
+                match = re.search("(?i)</body|</html", self.buffer.getvalue())
+                inject_at = False
+                if match:
+                    inject_at = match.start()
+                elif self._reached_eof:
+                    inject_at = len(self.buffer.getvalue())
+                if inject_at is not False:
+                    remainder = self.buffer.getvalue()[inject_at:]
+                    self.buffer.truncate(inject_at)
+                    self.buffer.write(self.EMBED_CODE)
+                    self.buffer.write(remainder)
+        self.buffer.seek(buf_pos, io.SEEK_SET)
+
+    def close(self):
+        self.fileobj.close()
+
+    def tell(self):
+        return self.buffer.tell()
+
+    def seek(self, offset, whence=io.SEEK_SET):
+        self._fill_buffer(offset, whence)
+        self.buffer.seek(offset, whence)
+
+    def read(self, count):
+        self._fill_buffer(count)
+        return self.buffer.read(count)
+
 class HttpHandler(SocketServer.StreamRequestHandler):
     """
         HTTP server
@@ -908,12 +977,18 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         if "Content-Type" not in headers:
             headers["Content-Type"] = "text/html"
 
+        stdout = cgi_process.stdout
+        if self.options["live_reload_enabled"] and headers["Content-Type"].startswith("text/html"):
+            stdout = EmbedLivereloadWrapper(stdout)
+            if "content-length" in cgi_headers:
+                del cgi_headers["content-length"]
+                del headers["Content-Length"]
         if "content-length" in cgi_headers:
             self.send_header(status, headers)
-            fd_copy(cgi_process.stdout, self.wfile, int(cgi_headers["content-length"]))
+            fd_copy(stdout, self.wfile, int(cgi_headers["content-length"]))
         else:
             with self.begin_chunked_reply(status, headers) as wfile:
-                fd_copy(cgi_process.stdout, wfile, -1)
+                fd_copy(stdout, wfile, -1)
         cgi_process.terminate()
 
     def handle_request_for_file(self):
@@ -1001,6 +1076,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             stat = os.stat(self.mapped_path)
             size = stat.st_size
             file = open(self.mapped_path, "rb")
+            if self.options["live_reload_enabled"] and mime_type.lower() == "text/html":
+                file = EmbedLivereloadWrapper(file)
+                size = -1
 
         status = "200 Ok"
         self.read_http_body()
@@ -1169,6 +1247,84 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         "Check if a file should be served as a CGI file"
         return "allow_cgi" in self.options and self.options["allow_cgi"] and os.path.isfile(mapped_path) and (os.path.splitext(mapped_path)[-1][1:] in self.options["cgi_handlers"] or os.access(mapped_path, os.X_OK))
 
+    def handle_live_reload(self):
+        """Handle a request for live-reload related stuff (js file and websocket protocol)
+
+        If any other feature later requires websockets, refactor this!
+        """
+        def _ws_reply(payload, opcode=1):
+            payload_length = len(payload)
+            if payload_length < 126:
+                payload_length = chr(payload_length)
+            elif payload_length < 0xffff:
+                payload_length = struct.pack("bI", 126, payload_length)
+            else:
+                payload_length = struct.pack("bQ", 127, payload_length)
+            self.wfile.write("%c%s%s" % (128 | opcode, payload_length, payload))
+        if self.path.startswith("/.live-reload/livereload.js"):
+            self.reply_with_file_like_object(cached_remote_resource("https://raw.githubusercontent.com/livereload/livereload-js/master/dist/livereload.js"), -1, "application/javascript", "200 Ok")
+            return
+        elif self.path == "/.live-reload/livereload":
+            # This implements the WebSocket API
+            # https://developer.mozilla.org/de/docs/WebSockets/Writing_WebSocket_servers
+            if "upgrade" not in self.headers or self.headers["upgrade"][0] != "websocket" or "connection" not in self.headers or "upgrade" not in "".join(self.headers["connection"]).lower() or "sec-websocket-key" not in self.headers:
+                self.send_error("400 Malformed request")
+                return
+            response_headers = {
+                "Sec-WebSocket-Accept": base64.b64encode(hashlib.sha1("%s%s" % (self.headers["sec-websocket-key"][0], "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")).digest()),
+                "Connection": "Upgrade",
+                "Upgrade": "websocket",
+            }
+            self.send_header("101 Switching protocols", response_headers)
+            self.connection.settimeout(3600)
+            # Initialize livereload protocol and set up watch
+            _ws_reply(json.dumps({ "command": "hello", "protocols": [ "http://livereload.com/protocols/official-7" ]}))
+            def _handle(event):
+                self.log(logging.DEBUG, "%(path)s changed, trigger livereload", path=event.pathname)
+                time.sleep(.1)
+                _ws_reply(json.dumps({ "command": "reload", "path": event.pathname, "liveCSS": True }))
+            manager = pyinotify.WatchManager()
+            manager.add_watch(".", pyinotify.IN_CLOSE_WRITE, rec=True, auto_add=True)
+            notifier = pyinotify.ThreadedNotifier(manager, _handle)
+            notifier.run()
+            # Read incoming Websocket chatter
+            payload_assemble = []
+            while True:
+                b = self.rfile.read(1)
+                if not b:
+                    break
+                first_byte = ord(b)
+                is_fin = first_byte & 128
+                opcode = first_byte & 0b1111
+                second_byte = ord(self.rfile.read(1))
+                is_masked = second_byte & 128
+                payload_len = second_byte & 127
+                if payload_len == 126:
+                    payload_len = ord(self.rfile.read(1)) << 8 | ord(self.rfile.read(1))
+                elif payload_len == 127:
+                    payload_len = struct.unpack("Q", self.rfile.read(4))
+                if is_masked:
+                    mask_key = self.rfile.read(4)
+                payload = self.rfile.read(payload_len)
+                if is_masked:
+                    payload = "".join((chr(ord(c) ^ ord(mask_key[i%4])) for i, c in enumerate(payload) ))
+                payload_assemble.append(payload)
+                if is_fin:
+                    payload = "".join(payload_assemble)
+                    payload_assemble = []
+                    self.log(logging.DEBUG, "Websocket opcode=%(opcode)d, payload='%(payload)s'", opcode=opcode, payload=payload)
+                    if opcode == 9:
+                        _ws_reply("", 10)
+                    elif opcode == 8:
+                        _ws_reply("", 8)
+                        break
+                    elif opcode == 1:
+                        # Actual message data in "payload", livereload does not have incoming messages
+                        pass
+            notifier.stop()
+            return
+        self.send_error("404 Not found")
+
     def handle_authentication(self, options_user, options_pass):
         "Return True if the user could be authenticated, or False, in which case the request has already been finished."
         authentication_ok = False
@@ -1224,7 +1380,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 path_candidate.append(part)
             htaccess_file = os.path.join("/".join(path_candidate), ".htaccess")
             if os.path.isfile(htaccess_file):
-                partial_request = "/".join(path_components[len(path_candidate):])
+                partial_request = ("/".join(path_components[len(path_candidate):]))[1:]
                 rewrite_engine_status = False
                 active_conds = []
                 with open(htaccess_file) as hta:
@@ -1303,6 +1459,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             else:
                 output.write(base64.b64decode(self.DIRECTORY_ICONS[load_icon if load_icon in self.DIRECTORY_ICONS else "application-octet-stream"]))
             self.reply_with_file_like_object(output, output.pos, "image/png", "200 Ok", { "Cache-Control": "public, max-age=31104000" })
+            return
+
+        if self.path.startswith("/.live-reload/") and self.options["live_reload_enabled"]:
+            self.handle_live_reload()
             return
 
         self.path_info = ""
@@ -1401,7 +1561,10 @@ def fd_copy(source_file, target_file, length):
     "Copy length bytes from source_file to target_file"
     def _read(amount):
         if type(source_file) is not socket._fileobject and hasattr(source_file, "fileno"):
-            return os.read(source_file.fileno(), amount)
+            try:
+                return os.read(source_file.fileno(), amount)
+            except io.UnsupportedOperation:
+                return source_file.read(amount)
         else:
             return source_file.read(amount)
 
@@ -1530,6 +1693,19 @@ def urldecode(string):
     "Replace %xx escape sequences by their byte values"
     return re.sub("%([0-9A-Fa-f]{2})", lambda x: chr(int(x.group(1), 16)), string)
 
+def cached_remote_resource(url):
+    "Serve a locally cached version of a remote resource"
+    cache_dir = os.path.join(os.path.expanduser(os.environ["XDG_CACHE_HOME"] if "XDG_CACHE_HOME" in os.environ else "~/.cache"), "iwebd")
+    if not os.path.isdir(cache_dir):
+        os.mkdir(cache_dir)
+    cache_name = "%s-%s" % (hashlib.sha1(url).hexdigest(), os.path.basename(url))
+    cache_file = os.path.join(cache_dir, cache_name)
+    if not os.access(cache_file, os.R_OK):
+        logger = logging.getLogger("cache")
+        logger.info("Loading %(url)s into cache at %(path)s", {"url": url, "path": cache_file})
+        urllib.urlretrieve(url, cache_file)
+    return open(cache_file)
+
 def natsort_key(string):
     "Return a key for natural sorting of a string argument"
     return [ int(s) if s.isdigit() else s for s in re.split(r"(\d+)", string) ]
@@ -1549,7 +1725,6 @@ def hostportpair(service, string):
         return host, int(port)
     else:
         return "", int(string)
-
 
 class LogFormatter(logging.Formatter):
     def format(self, record):
@@ -1583,7 +1758,6 @@ def default_port(service):
         return 1234
 
 def autoreload(main_pid, watch_file_name):
-    import pyinotify
     logger = logging.getLogger("autoreload")
     def _handle(e):
         logger.info("Reloading due to write to %(self)s", { "self": __file__ })
@@ -1591,7 +1765,7 @@ def autoreload(main_pid, watch_file_name):
             os.kill(main_pid, signal.SIGUSR1)
             time.sleep(2)
     manager = pyinotify.WatchManager()
-    manager.add_watch(watch_file_name, pyinotify.EventsCodes.FLAG_COLLECTIONS["OP_FLAGS"]["IN_CLOSE_WRITE"])
+    manager.add_watch(watch_file_name, pyinotify.IN_CLOSE_WRITE)
     notifier = pyinotify.Notifier(manager, _handle)
     logger.info("autoreload active")
     notifier.loop()
@@ -1615,6 +1789,8 @@ def main():
     if has_ssl:
         parser.add_argument("--ssl-cert", help="Use a custom SSL certificate (Default: Auto-generated)", metavar="file")
         parser.add_argument("--ssl-key", help="Use a custom SSL keyfile (Default: Auto-generated)", metavar="file")
+    if has_pyinotify:
+        parser.add_argument("--live-reload", action="store_true", help="Activate a live-reload server in httpd (with transparent JS injection)")
     parser.add_argument("--help", action="help", help="Display this help")
     parser.add_argument("--root", help="root directory to serve from", metavar="directory")
     options = vars(parser.parse_args(sys.argv[1:]))
@@ -1643,6 +1819,7 @@ def main():
     server_options = {
         "write_access": options["w"],
         "dav_enabled": options["d"],
+        "live_reload_enabled": has_pyinotify & options["live_reload"],
         "user": user,
         "pass": password,
         "allow_cgi": options["c"],
@@ -1696,9 +1873,7 @@ def main():
             create_avahi_group("ftp", ftpd_port[1])
 
     if servers and options["v"]:
-        try:
-            import pyinotify
-        except:
+        if not has_pyinotify:
             logging.getLogger("autoreload").debug("pyinotify unavailable. Not running autoreload thread.")
         else:
             ar_thread = threading.Thread(target=autoreload, args=(os.getpid(), script_file_name,))
