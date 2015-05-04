@@ -1819,7 +1819,7 @@ def main():
     server_options = {
         "write_access": options["w"],
         "dav_enabled": options["d"],
-        "live_reload_enabled": has_pyinotify & options["live_reload"],
+        "live_reload_enabled": has_pyinotify and options["live_reload"],
         "user": user,
         "pass": password,
         "allow_cgi": options["c"],
