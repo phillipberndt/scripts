@@ -574,7 +574,7 @@ if has_gzip:
 
 class EmbedLivereloadWrapper(io.IOBase):
     "Wrapper around a HTML file that embeds a LiveReload JS into the file"
-    EMBED_CODE = """<script>document.write('<script src="/.live-reload/livereload.js?host=' + (location.host || 'localhost').split(':')[0] + '&port=/.live-reload"><' + '/script>');</script>"""
+    EMBED_CODE = """<script>document.write('<script src="/.live-reload/lr.js"><' + '/script>');</script>"""
 
     def __init__(self, fileobj):
         self.fileobj = fileobj
@@ -728,6 +728,23 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 e.dataTransfer.dropEffect = "copy";
             });
         </script>
+    """
+
+    LIVE_RELOAD_JS = """
+        setTimeout(function() {
+            var evt = new EventSource("/.live-reload/feed");
+            evt.onmessage = function(msg) {
+                for(var url of performance.getEntries()) {
+                    var rpath = url.name.match(/^https?:\/\/[^\/]+(\/[^\?]*)(\?.*)?$/);
+                    if(rpath) {
+                        if(rpath[1] == msg.data) {
+                            location.reload();
+                            return;
+                        }
+                    }
+                }
+            }
+        }, 500);
     """
 
     DIRECTORY_ICONS = {
@@ -1076,7 +1093,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             stat = os.stat(self.mapped_path)
             size = stat.st_size
             file = open(self.mapped_path, "rb")
-            if self.options["live_reload_enabled"] and mime_type.lower() == "text/html":
+            if self.options["live_reload_enabled"] and mime_type and mime_type.lower() == "text/html":
                 file = EmbedLivereloadWrapper(file)
                 size = -1
 
@@ -1249,79 +1266,25 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
     def handle_live_reload(self):
         """Handle a request for live-reload related stuff (js file and websocket protocol)
-
-        If any other feature later requires websockets, refactor this!
         """
-        def _ws_reply(payload, opcode=1):
-            payload_length = len(payload)
-            if payload_length < 126:
-                payload_length = chr(payload_length)
-            elif payload_length < 0xffff:
-                payload_length = struct.pack("bI", 126, payload_length)
-            else:
-                payload_length = struct.pack("bQ", 127, payload_length)
-            self.wfile.write("%c%s%s" % (128 | opcode, payload_length, payload))
-        if self.path.startswith("/.live-reload/livereload.js"):
-            self.reply_with_file_like_object(cached_remote_resource("https://raw.githubusercontent.com/livereload/livereload-js/master/dist/livereload.js"), -1, "application/javascript", "200 Ok")
-            return
-        elif self.path == "/.live-reload/livereload":
-            # This implements the WebSocket API
-            # https://developer.mozilla.org/de/docs/WebSockets/Writing_WebSocket_servers
-            if "upgrade" not in self.headers or self.headers["upgrade"][0] != "websocket" or "connection" not in self.headers or "upgrade" not in "".join(self.headers["connection"]).lower() or "sec-websocket-key" not in self.headers:
-                self.send_error("400 Malformed request")
-                return
-            response_headers = {
-                "Sec-WebSocket-Accept": base64.b64encode(hashlib.sha1("%s%s" % (self.headers["sec-websocket-key"][0], "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")).digest()),
-                "Connection": "Upgrade",
-                "Upgrade": "websocket",
-            }
-            self.send_header("101 Switching protocols", response_headers)
-            self.connection.settimeout(3600)
-            # Initialize livereload protocol and set up watch
-            _ws_reply(json.dumps({ "command": "hello", "protocols": [ "http://livereload.com/protocols/official-7" ]}))
+        if self.path == "/.live-reload/feed":
+            # Home-brew simplified live reload protocol
+            self.send_header("200 Ok", { "Content-Type": "text/event-stream; charset=utf8", "Cache-Control": "no-cache" })
             def _handle(event):
-                self.log(logging.DEBUG, "%(path)s changed, trigger livereload", path=event.pathname)
-                time.sleep(.1)
-                _ws_reply(json.dumps({ "command": "reload", "path": event.pathname, "liveCSS": True }))
-            manager = pyinotify.WatchManager()
-            manager.add_watch(".", pyinotify.IN_CLOSE_WRITE, rec=True, auto_add=True)
-            notifier = pyinotify.ThreadedNotifier(manager, _handle)
-            notifier.run()
-            # Read incoming Websocket chatter
-            payload_assemble = []
+                try:
+                    self.wfile.write("data: %s\n\n" % event.pathname)
+                except:
+                    pass
+            live_reload_register(_handle)
+            self.connection.settimeout(3600)
             while True:
-                b = self.rfile.read(1)
-                if not b:
+                b = self.rfile.read(1024)
+                if len(b) < 1024:
                     break
-                first_byte = ord(b)
-                is_fin = first_byte & 128
-                opcode = first_byte & 0b1111
-                second_byte = ord(self.rfile.read(1))
-                is_masked = second_byte & 128
-                payload_len = second_byte & 127
-                if payload_len == 126:
-                    payload_len = ord(self.rfile.read(1)) << 8 | ord(self.rfile.read(1))
-                elif payload_len == 127:
-                    payload_len = struct.unpack("Q", self.rfile.read(4))
-                if is_masked:
-                    mask_key = self.rfile.read(4)
-                payload = self.rfile.read(payload_len)
-                if is_masked:
-                    payload = "".join((chr(ord(c) ^ ord(mask_key[i%4])) for i, c in enumerate(payload) ))
-                payload_assemble.append(payload)
-                if is_fin:
-                    payload = "".join(payload_assemble)
-                    payload_assemble = []
-                    self.log(logging.DEBUG, "Websocket opcode=%(opcode)d, payload='%(payload)s'", opcode=opcode, payload=payload)
-                    if opcode == 9:
-                        _ws_reply("", 10)
-                    elif opcode == 8:
-                        _ws_reply("", 8)
-                        break
-                    elif opcode == 1:
-                        # Actual message data in "payload", livereload does not have incoming messages
-                        pass
-            notifier.stop()
+            live_reload_remove(_handle)
+            self.send_error("400 Bad request", force_close=True)
+        elif self.path == "/.live-reload/lr.js":
+            self.reply_with_file_like_object(StringIO.StringIO(self.LIVE_RELOAD_JS), -1, "application/javascript", "200 Ok")
             return
         self.send_error("404 Not found")
 
@@ -1706,6 +1669,28 @@ def cached_remote_resource(url):
         urllib.urlretrieve(url, cache_file)
     return open(cache_file)
 
+_live_reload_callbacks = []
+
+def live_reload_register(callback):
+    _live_reload_callbacks.append(callback)
+
+def live_reload_remove(callback):
+    _live_reload_callbacks.remove(callback)
+
+def live_reload_setup():
+    "Setup inotify for live reload connections"
+    logger = logging.getLogger("livereload")
+    def _handle(event):
+        if event.pathname.startswith(os.getcwd()):
+            event.pathname = event.pathname[len(os.getcwd()):]
+        logger.debug("%(path)s changed, trigger livereload", {"path": event.pathname})
+        for cb in _live_reload_callbacks:
+            cb(event)
+    manager = pyinotify.WatchManager()
+    manager.add_watch(".", pyinotify.IN_CLOSE_WRITE, rec=True, auto_add=True)
+    notifier = pyinotify.ThreadedNotifier(manager, _handle)
+    notifier.start()
+
 def natsort_key(string):
     "Return a key for natural sorting of a string argument"
     return [ int(s) if s.isdigit() else s for s in re.split(r"(\d+)", string) ]
@@ -1842,9 +1827,13 @@ def main():
         else:
             ssl_key = SSLKey()
 
-    servers = []
     extra_thread_count = 0
 
+    if server_options["live_reload_enabled"]:
+        live_reload_setup()
+        extra_thread_count += 1
+
+    servers = []
     http_variants = []
     if options["h"] is not False:
         http_variants.append(("HTTP", {}, options["h"] or ("", default_port("httpd")), "http", "webdav"))
