@@ -1,0 +1,43 @@
+This is an implementation of a livereload server.
+
+After working with this for a while I noticed that this is horribly
+overengineered. WebSockets are, because they were crafted to work in academic
+situations (e.g. support for fragmented messages) and with non-compliant
+proxies (e.g. proxies that do not close a connection if there's random bytes
+ranging from \x00 to \x0F before a request and that don't close it either if
+they do not understand a request). Livereload is, because it uses WebSockets
+instead of server-side events (granted, they don't work with IE and as long as
+you're using a framework on the server side, it doesn't really matter. Still,
+WebSockets solve a much more complicated problem than required here) and
+because it tries to do some magic to find which resources are on a page when
+window.performance.getEntries() already has a complete list. Finally, it tries
+to reload only the changed resources, but location.reload() really works just
+fine within a LAN -- if it doesn't, that's a bug in the website anyway because
+hitting F5 is something that users do and it shouldn't reset a user to some
+other view.
+
+I've found that its much easier to go with the alternative:
+
+setTimeout(function() {
+    var evt = new EventSource("/.live-reload/feed");
+    evt.onmessage = function(msg) {
+        for(var url of performance.getEntries()) {
+            var rpath = url.name.match(/^https?:\/\/[^\/]+(\/[^\?]*)(\?.*)?$/);
+            if(rpath) {
+                if(rpath[1] == msg.data) {
+                    location.reload();
+                    return;
+                }
+            }
+        }
+    }
+}, 500);
+
+
+on the client side, on the server side just set the Content-Type to text/event-source
+and send
+
+data: <filename relative to root with leading slash>\n\n
+
+whenever a file changes. iwebd (one directory up, iwebd subdir) implements this and
+injects the necessary JS transparently into all served HTML files on request.
