@@ -987,7 +987,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             else:
                 last_header, value = cgi_header.split(":", 1)
                 last_header = last_header.lower()
-                cgi_headers[last_header] = [ value.strip() ]
+                if last_header in cgi_headers:
+                    cgi_headers[last_header].append(value.strip())
+                else:
+                    cgi_headers[last_header] = [ value.strip() ]
 
         status = "200 Ok" if "status" not in cgi_headers else cgi_headers["status"][0]
         headers = { ucparts(key): ", ".join(value) for key, value in cgi_headers.items() if key != "status" }
