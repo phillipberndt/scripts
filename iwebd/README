@@ -26,6 +26,7 @@ iwebd's features include
    * Download directories as archive files
    * Upload files
    * Transparent compression (gzip)
+   * Transparent live-reload integration (my own live-reload alternative, actually)
  * Avahi announcement of both in the local network
  * Multi-threaded
 
