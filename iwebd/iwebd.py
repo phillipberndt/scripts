@@ -817,10 +817,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
     def read_http_method(self):
         "Read the first line of an HTTP request"
-        line = self.rfile.readline()
-        if not line:
-            return False
         try:
+            line = self.rfile.readline()
+            assert line
             self.method, self.path, self.http_version = line.split()
         except:
             self.method = "GET"
