@@ -734,8 +734,15 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     """
 
     LIVE_RELOAD_JS = """
-        setTimeout(function() {
-            var evt = new EventSource("/.live-reload/feed");
+        document.addEventListener("load", function() {
+            var urls = [];
+            for(var url of performance.getEntries()) {
+                if(url.name.substring(0, location.protocol.length + 2 + location.host.length) == location.protocol + "//" + location.host) {
+                    urls.push(encodeURIComponent(url.name.substring(location.protocol.length + 2 + location.host.length).replace(/\?.+/, "")));
+                }
+            }
+            urls = urls.join("&");
+            var evt = new EventSource("/.live-reload/feed?" + urls);
             evt.onmessage = function(msg) {
                 for(var url of performance.getEntries()) {
                     var rpath = url.name.match(/^https?:\/\/[^\/]+(\/[^\?]*)(\?.*)?$/);
@@ -1272,10 +1279,16 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     def handle_live_reload(self):
         """Handle a request for live-reload related stuff (js file and websocket protocol)
         """
-        if self.path == "/.live-reload/feed":
+        if self.path.startswith("/.live-reload/feed"):
             # Home-brew simplified live reload protocol
+            urls = None
+            if "?" in self.path:
+                urls = map(urllib.unquote, self.path[self.path.index("?")+1:].split("&"))
+                self.log(logging.DEBUG, "Live-reload requested upon change of %(urls)r", urls=urls)
             self.send_header("200 Ok", { "Content-Type": "text/event-stream; charset=utf8", "Cache-Control": "no-cache" })
             def _handle(event):
+                if urls and event.pathname not in urls:
+                    return
                 try:
                     self.wfile.write("data: %s\n\n" % event.pathname)
                 except:
@@ -1689,6 +1702,9 @@ def live_reload_setup():
     def _handle(event):
         if event.pathname.startswith(os.getcwd()):
             event.pathname = event.pathname[len(os.getcwd()):]
+        if os.path.basename(event.pathname).startswith("."):
+            # Ignore hidden files
+            return
         logger.debug("%(path)s changed, trigger livereload", {"path": event.pathname})
         for cb in _live_reload_callbacks:
             cb(event)
