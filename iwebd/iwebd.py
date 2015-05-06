@@ -1285,6 +1285,12 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             if "?" in self.path:
                 urls = map(urllib.unquote, self.path[self.path.index("?")+1:].split("&"))
                 self.log(logging.DEBUG, "Live-reload requested upon change of %(urls)r", urls=urls)
+                for url in urls:
+                    path = "./%s" % url
+                    if os.path.isfile(path):
+                        live_reload_add_watch(path)
+            else:
+                live_reload_add_watch(".", rec=True)
             self.send_header("200 Ok", { "Content-Type": "text/event-stream; charset=utf8", "Cache-Control": "no-cache" })
             def _handle(event):
                 if urls and event.pathname not in urls:
@@ -1696,8 +1702,13 @@ def live_reload_register(callback):
 def live_reload_remove(callback):
     _live_reload_callbacks.remove(callback)
 
+def live_reload_add_watch(filename, **kwargs):
+    global _live_reload_manager
+    _live_reload_manager.add_watch(os.path.dirname(filename), pyinotify.IN_CLOSE_WRITE, **kwargs)
+
 def live_reload_setup():
     "Setup inotify for live reload connections"
+    global _live_reload_manager
     logger = logging.getLogger("livereload")
     def _handle(event):
         if event.pathname.startswith(os.getcwd()):
@@ -1708,9 +1719,8 @@ def live_reload_setup():
         logger.debug("%(path)s changed, trigger livereload", {"path": event.pathname})
         for cb in _live_reload_callbacks:
             cb(event)
-    manager = pyinotify.WatchManager()
-    manager.add_watch(".", pyinotify.IN_CLOSE_WRITE, rec=True, auto_add=True)
-    notifier = pyinotify.ThreadedNotifier(manager, _handle)
+    _live_reload_manager = pyinotify.WatchManager()
+    notifier = pyinotify.ThreadedNotifier(_live_reload_manager, _handle)
     notifier.start()
 
 def natsort_key(string):
