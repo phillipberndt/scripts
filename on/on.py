@@ -219,6 +219,41 @@ class CPUUsage(OnEvent):
             if usage < self.threshold:
                 break
 # }}}
+# Movement {{{
+try:
+    import cv2
+    has_opencv = True
+except:
+    has_opencv = False
+if has_opencv:
+    class Movement(OnEvent):
+        DESCRIPTION = "Detect movement on the webcam"
+        PREFIX = "movement"
+
+        def __init__(self, parameter):
+            self.cam = cv2.VideoCapture(0)
+            status(0, "movement", "Waiting for movement")
+
+        def grab_frame(self):
+            frame = self.cam.read()[1]
+            while frame is None:
+                self.cam = cv2.VideoCapture(0)
+                frame = self.cam.read()[1]
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            return frame
+        def wait_for_event(self):
+            while True:
+                for i in range(10):
+                    frame = self.grab_frame()
+                maxVal = 0
+                while maxVal < 60:
+                    new_frame = self.grab_frame()
+                    diff = cv2.absdiff(cv2.GaussianBlur(frame, (21, 21), 0), cv2.GaussianBlur(new_frame, (21, 21), 0))
+                    frame = new_frame
+                    (minVal, maxVal, minLoc, maxLoc) = cv2.minMaxLoc(diff)
+                    status(0, "movement", "Movement level is %2d" % maxVal, True)
+                return True
+# }}}
 # Whistling {{{
 try:
     import alsaaudio
