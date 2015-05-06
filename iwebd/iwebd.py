@@ -1108,7 +1108,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         "Reply to a request with a file object"
         start = 0
         headers = additional_headers.copy()
-        if size > 0:
+        if size >= 0:
             if size > 1024 and size < 1024000 and has_gzip and "accept-encoding" in self.headers and "gzip" in (", ".join(self.headers["accept-encoding"])).lower():
                 # Compress small files on the fly
                 compressed = StringIO.StringIO()
