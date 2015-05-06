@@ -600,10 +600,13 @@ class EmbedLivereloadWrapper(io.IOBase):
         buf_pos = self.buffer.tell()
         remain = reach - len(self.buffer.getvalue())
         if remain > 0:
-            data = self.fileobj.read(remain)
-            self.buffer.write(data)
-            if len(data) < remain:
-                self._reached_eof = True
+            while remain > 0:
+                data = file_read(self.fileobj, remain)
+                self.buffer.write(data)
+                if len(data) == 0:
+                    self._reached_eof = True
+                    break
+                remain -= len(data)
             if not self._injected:
                 match = re.search("(?i)</body|</html", self.buffer.getvalue())
                 inject_at = False
@@ -1523,28 +1526,29 @@ def format_size(size):
         size /= 1024.
     return "%2.2f %sBi" % (size, prefix)
 
+def file_read(fileobj, amount):
+    "Safe way to read from file objects that returns '' on non-blocking sockets if no data is available"
+    if type(fileobj) is not socket._fileobject and hasattr(fileobj, "fileno"):
+        try:
+            return os.read(fileobj.fileno(), amount)
+        except io.UnsupportedOperation:
+            return fileobj.read(amount)
+    else:
+        return fileobj.read(amount)
+
 def fd_copy(source_file, target_file, length):
     "Copy length bytes from source_file to target_file"
-    def _read(amount):
-        if type(source_file) is not socket._fileobject and hasattr(source_file, "fileno"):
-            try:
-                return os.read(source_file.fileno(), amount)
-            except io.UnsupportedOperation:
-                return source_file.read(amount)
-        else:
-            return source_file.read(amount)
-
     buffer = 10240
     if length < 0:
         while True:
-            data = _read(buffer)
+            data = file_read(source_file, buffer)
             if not data:
                 break
             if target_file:
                 target_file.write(data)
     else:
         while length > 0:
-            data = _read(min(buffer, min(length, 10240)))
+            data = file_read(source_file, min(buffer, min(length, 10240)))
             if not data:
                 raise IOError("Failed to read data")
             if target_file:
