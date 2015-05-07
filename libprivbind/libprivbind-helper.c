@@ -24,6 +24,14 @@ int main() {
 	int fd = atoi(fd_str);
 	int port = atoi(port_str);
 
+	int is_suid = 0;
+	if(getuid() != geteuid() && geteuid() == 0) {
+		is_suid = 1;
+		if(seteuid(getuid()) != 0) {
+			exit(-6);
+		}
+	}
+
 	int sock_domain;
 	int sock_domain_length = sizeof(sock_domain);
 	if(getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &sock_domain, &sock_domain_length) != 0) {
@@ -53,11 +61,20 @@ int main() {
 		exit(-4);
 	}
 
+	if(is_suid) {
+		if(seteuid(0) != 0) {
+			exit(errno);
+		}
+	}
+
 	if(bind(fd, address_info->ai_addr, address_info->ai_addrlen) == 0) {
 		freeaddrinfo(address_info);
 		exit(0);
 	}
 
 	freeaddrinfo(address_info);
+	if(errno == EACCES) {
+		exit(-6);
+	}
 	exit(errno);
 }

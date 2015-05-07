@@ -42,6 +42,8 @@ def bind(socket, address):
         raise RuntimeError("Failed to bind socket to port %d: Invalid host address" % port)
     elif retval == 251:
         raise RuntimeError("Failed to bind socket to port %d: Failed to run helper program `libprivbind-helper'" % port)
+    elif retval == 250:
+        raise RuntimeError("Failed to bind socket to port %d: Helper program `libprivbind-helper' is neither suid root nor has capibility cap_net_bind_service" % port)
     elif retval != 0:
         raise RuntimeError("Failed to bind socket to port %d: error %d (%s)" % (port, retval, os.strerror(retval)))
 
