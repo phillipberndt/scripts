@@ -91,7 +91,7 @@ mkc() {
 	export CWD
 	C="$@"
 	[[ "$C" == "" ]] && C="$(date +'%d.%m')"
-	test -d "$C" || mkdir "$C"
+	test -d "$C" || mkdir -p "$C"
 	cd "$C"
 }
 gitup() {
