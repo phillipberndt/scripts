@@ -11,6 +11,7 @@ import atexit
 import base64
 import datetime
 import email
+import email.parser
 import hashlib
 import io
 import itertools
@@ -815,7 +816,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         if not "_http_active_nonces" in options:
             options["_http_active_nonces"] = {}
         self.active_nonces = options["_http_active_nonces"]
-        self.body_read = False
+        self._body_reader = False
         SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
 
     def setup(self):
@@ -856,25 +857,50 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 self.headers[previous_header] = []
             self.headers[previous_header].append(value.strip())
 
+    def get_http_body_reader(self):
+        "Return a file-like object that reads the body of a request. Returns a singleton for each request."
+        if not self._body_reader:
+            if "expect" in self.headers and "100-continue" in self.headers["expect"]:
+                self.wfile.write("%s 100 Continue\r\n\r\n" % self.http_version)
+            class _body_reader(io.BufferedIOBase):
+                def __init__(self, req):
+                    self.req = req
+                    self.bytes_to_read = int(req.headers["content-length"][0]) if "content-length" in req.headers else None
+                    self.chunk_buffer = []
+                    self.eof = False
+                def read(self, size=None):
+                    if self.eof:
+                        return ""
+                    if self.bytes_to_read is not None:
+                        ret = file_read(self.req.rfile, min(self.bytes_to_read, size) if size is not None else self.bytes_to_read)
+                        self.bytes_to_read -= len(ret)
+                        if not self.bytes_to_read:
+                            self.eof = True
+                        return ret
+                    elif "transfer-encoding" in self.req.headers:
+                        if self.req.headers["transfer-encoding"][0] is not "chunked":
+                            raise ValueError("Unsupported transfer encoding: %s" % self.req.headers["transfer-encoding"][0])
+                        while size is None or size > sum(map(len, self.chunk_buffer)):
+                            chunk_size = int(self.rfile.readline(), 16)
+                            if chunk_size == 0:
+                                self.read_http_headers()
+                                self.eof = True
+                                break
+                            self.chunk_buffer.append(file_read(self.req.rfile, chunk_size))
+                        data = "".join(self.chunk_buffer)
+                        self.chunk_buffer = [ data[size:] ] if size is not None else []
+                        return data[:size] if size is not None else data
+                    else:
+                        self.eof = True
+                        return ""
+            self._body_reader = _body_reader(self)
+        return self._body_reader
+
     def read_http_body(self, target_file=None):
         "Read the body of a request. Safe to call twice, as this function memorizes whether the body has been read."
-        if self.body_read:
-            return
-        if "expect" in self.headers and "100-continue" in self.headers["expect"]:
-            self.wfile.write("%s 100 Continue\r\n\r\n" % self.http_version)
-        if "content-length" in self.headers:
-            bytes_to_read = int(self.headers["content-length"][0])
-            fd_copy(self.rfile, target_file, bytes_to_read)
-        elif "transfer-encoding" in self.headers:
-            if self.headers["transfer-encoding"][0] is not "chunked":
-                raise ValueError("Unsupported transfer encoding: %s" % self.headers["transfer-encoding"][0])
-            while True:
-                chunk_size = int(self.rfile.readline(), 16)
-                if chunk_size == 0:
-                    break
-                fd_copy(self.rfile, target_file, chunk_size)
-            self.read_http_headers()
-        self.body_read = True
+        body_reader = self.get_http_body_reader()
+        fd_copy(body_reader, target_file, -1)
+        assert body_reader.read() == ""
 
     def send_header(self, status, headers):
         "Send the headers of a reply."
@@ -1037,10 +1063,16 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 return
 
             if "write_access" in self.options and self.options["write_access"] and "content-type" in self.headers:
-                body = StringIO.StringIO()
-                body.write("Content-Type: %s\r\n\r\n" % (self.headers["content-type"][0]))
-                self.read_http_body(body)
-                msg = email.message_from_string(body.getvalue())
+                fp = email.parser.FeedParser()
+                fp.feed("Content-Type: %s\r\n\r\n" % (self.headers["content-type"][0]))
+                body = self.get_http_body_reader()
+                while True:
+                    data = body.read(10240)
+                    if not data:
+                        break
+                    fp.feed(data)
+                msg = fp.close()
+                del fp
                 is_upload = False
                 for part in msg.get_payload():
                     if "upload" in part.get("content-disposition", "") and part.get_payload() == "Upload":
@@ -1419,7 +1451,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
     def handle_request(self):
         "Handle a single request."
-        self.body_read = False
+        self._body_reader = False
         if not self.read_http_method():
             return
         self.headers = {}
