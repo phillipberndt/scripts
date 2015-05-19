@@ -17,7 +17,23 @@ class OnEvent(object):
     PARAMETER_DESCRIPTION = None
 
     def __init__(self, parameter):
-        pass
+        if self.PARAMETER_DESCRIPTION is None and parameter is not None:
+            raise ValueError("%s does not expect an argument" % self.__class__.__name__)
+        self.parameter = parameter
+
+    def wait_for_event(self):
+        raise NotImplementedError()
+
+class Modifier(object):
+    DESCRIPTION = "sample modifier"
+    PREFIX = "~"
+
+    def __init__(self, event_handler, parameter):
+        self.event_handler = event_handler
+        self.parameter = parameter
+
+    def wait_for_event(self):
+        raise NotImplementedError()
 
 # Program exit {{{
 class OnPIDExit(OnEvent):
@@ -97,7 +113,7 @@ if has_pyinotify:
 # Network throughput {{{
 class NetworkThroughput(OnEvent):
     DESCRIPTION = "Network throughput drops below a threshold"
-    PREFIX = "network"
+    PREFIX = "nettput"
     PARAMETER_DESCRIPTION = "kiB/s"
 
     @staticmethod
@@ -127,10 +143,32 @@ class NetworkThroughput(OnEvent):
             if throughput < self.threshold:
                 break
 # }}}
+# Ping {{{
+class Pingable(OnEvent):
+    DESCRIPTION = "Host replies to ping"
+    PREFIX = "ping"
+    PARAMETER_DESCRIPTION = "remote host"
+
+    def __init__(self, parameter):
+        self.parameter = parameter or "8.8.8.8"
+
+    def wait_for_event(self):
+        status(0, "ping", "Trying to ping %s" % self.parameter)
+        with open("/dev/null", "w") as null:
+            spinner = "|/-\\"
+            n = 0
+            while True:
+                if subprocess.call(["ping", "-c", "1", "-W", "5", self.parameter], stdout=null, stderr=null) == 0:
+                    status(0, "ping", "Received ping reply from %s" % self.parameter, True)
+                    break
+                else:
+                    n += 1
+                    status(0, "ping", "Didn't receive a ping reply from %s [%c]" % (self.parameter, spinner[n%len(spinner)]), True)
+# }}}
 # Socket connection {{{
 class SocketConnection(OnEvent):
     DESCRIPTION = "Network connection to host is closed"
-    PREFIX = "tcp"
+    PREFIX = "tcpconn"
     PARAMETER_DESCRIPTION = "remote host"
 
     @staticmethod
@@ -158,7 +196,7 @@ class SocketConnection(OnEvent):
             self.ip = parameter
         else:
             try:
-                ips = socket.gethostbyaddr("xx" + parameter)[2]
+                ips = socket.gethostbyaddr(parameter)[2]
             except socket.gaierror:
                 ips = []
             for ip in ips:
@@ -308,7 +346,7 @@ if has_alsa and has_numpy:
 
 def print_help():
     print "Execute a program once a certain event occurs"
-    print "Syntax: on [-krw] <type>[:<arguments>] <action>"
+    print "Syntax: on [-krw] [modifier(s)]<type>[:<arguments>] <action>"
     print
     print "Options:"
     print "  -k   Kill old action if it is retriggered too fast"
@@ -317,7 +355,12 @@ def print_help():
     print
     print "Event types:"
     for cls in sorted(OnEvent.__subclasses__(), key=lambda x: x.PREFIX):
-        print "  %-20s %s" % ("%s:<%s>" % (cls.PREFIX, cls.PARAMETER_DESCRIPTION) if cls.PARAMETER_DESCRIPTION else cls.PREFIX, cls.DESCRIPTION)
+        print "  %-25s %s" % ("%s:<%s>" % (cls.PREFIX, cls.PARAMETER_DESCRIPTION) if cls.PARAMETER_DESCRIPTION else cls.PREFIX, cls.DESCRIPTION)
+    print
+    if Modifier.__subclasses__():
+        print "Modifiers:"
+        for cls in sorted(Modifier.__subclasses__(), key=lambda x: x.PREFIX):
+            print "  %-25s %s" % (cls.PREFIX, cls.DESCRIPTION)
 
 def status(level, component, line, is_update=False):
     if level == 0:
@@ -370,6 +413,18 @@ def main():
         print_help()
         sys.exit(1)
 
+    modifiers = []
+    while True:
+        for cls in sorted(Modifier.__subclasses__(), key=lambda x: x.PREFIX):
+            if event.startswith(cls.PREFIX):
+                modifiers.append(cls)
+                event = event[1:]
+            else:
+                break
+        else:
+            continue
+        break
+
     for cls in OnEvent.__subclasses__():
         if cls.PREFIX == event:
             handler = cls
@@ -383,6 +438,8 @@ def main():
     proc = None
     while True:
         instance = handler(parameter)
+        for modifier in modifiers:
+            instance = modifier(instance, parameter)
         instance.wait_for_event()
         if "-k" in opts and proc:
             if proc.poll() is None:
