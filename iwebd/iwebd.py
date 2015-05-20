@@ -24,6 +24,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -275,29 +276,37 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 file_path = path
             else:
                 file_path = os.path.join(path, element)
+            symlink_info = ""
+            ftype = "-"
             try:
-                stat = os.stat(file_path)
+                fstat = os.lstat(file_path)
+                if stat.S_ISLNK(fstat.st_mode):
+                    symlink_info = " -> %s" % os.readlink(file_path)
+                    ftype = "l"
+                elif stat.S_ISDIR(fstat.st_mode):
+                    ftype = "d"
             except:
                 continue
-            mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
-            response.write("%c%c%c%c%c%c%c%c%c%c 1 %s %s %13d %s %3s %s %s\r\n" % (
-                "d" if os.path.isdir(file_path) else "-",
-                "r" if stat.st_mode & 00400 else "-",
-                "w" if stat.st_mode & 00200 else "-",
-                "x" if stat.st_mode & 00100 else "-",
-                "r" if stat.st_mode & 00040 else "-",
-                "w" if stat.st_mode & 00020 else "-",
-                "x" if stat.st_mode & 00010 else "-",
-                "r" if stat.st_mode & 00004 else "-",
-                "w" if stat.st_mode & 00002 else "-",
-                "x" if stat.st_mode & 00001 else "-",
-                pwd.getpwuid(stat.st_uid).pw_name if has_pwd else "-",
-                grp.getgrgid(stat.st_gid).gr_name if has_pwd else "-",
-                stat.st_size,
+            mtime = datetime.datetime.fromtimestamp(fstat.st_mtime)
+            response.write("%c%c%c%c%c%c%c%c%c%c 1 %s %s %13d %s %3s %s %s%s\r\n" % (
+                ftype,
+                "r" if fstat.st_mode & 00400 else "-",
+                "w" if fstat.st_mode & 00200 else "-",
+                "x" if fstat.st_mode & 00100 else "-",
+                "r" if fstat.st_mode & 00040 else "-",
+                "w" if fstat.st_mode & 00020 else "-",
+                "x" if fstat.st_mode & 00010 else "-",
+                "r" if fstat.st_mode & 00004 else "-",
+                "w" if fstat.st_mode & 00002 else "-",
+                "x" if fstat.st_mode & 00001 else "-",
+                pwd.getpwuid(fstat.st_uid).pw_name if has_pwd else "-",
+                grp.getgrgid(fstat.st_gid).gr_name if has_pwd else "-",
+                fstat.st_size,
                 mtime.strftime("%b"),
                 mtime.strftime("%d"),
-                mtime.strftime("%H:%I") if mtime.strftime("%Y") == datetime.datetime.today().strftime("%Y") else  mtime.strftime("%Y"),
-                element))
+                mtime.strftime("%H:%I") if mtime.strftime("%Y") == datetime.datetime.today().strftime("%Y") else mtime.strftime("%Y"),
+                element,
+                symlink_info))
         response.seek(0)
         return response
 
