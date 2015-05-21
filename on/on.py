@@ -51,7 +51,7 @@ class OnPIDExit(OnEvent):
             if not OnPIDExit.is_alive(pid_list[0]):
                 raise ValueError("PID %d does not belong to an existing process" % pid_list[0])
         except ValueError:
-            processes = dict((x.strip().split(None, 1) for x in subprocess.check_output(["pgrep", "-lf", parameter]).split("\n") if x.strip()))
+            processes = dict((x.strip().split(None, 1) for x in subprocess.check_output(["pgrep", "-af", parameter]).split("\n") if x.strip()))
             if str(os.getpid()) in processes:
                 del processes[str(os.getpid())]
             if not processes:
