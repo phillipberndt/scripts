@@ -414,16 +414,16 @@ def main():
         sys.exit(1)
 
     modifiers = []
-    while True:
-        for cls in sorted(Modifier.__subclasses__(), key=lambda x: x.PREFIX):
-            if event.startswith(cls.PREFIX):
-                modifiers.append(cls)
-                event = event[1:]
+    if len(Modifier.__subclasses__()) > 0:
+        while True:
+            for cls in sorted(Modifier.__subclasses__(), key=lambda x: x.PREFIX):
+                if event.startswith(cls.PREFIX):
+                    modifiers.append(cls)
+                    event = event[1:]
+                    break
             else:
-                break
-        else:
-            continue
-        break
+                continue
+            break
 
     for cls in OnEvent.__subclasses__():
         if cls.PREFIX == event:
