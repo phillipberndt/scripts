@@ -12,6 +12,7 @@ import base64
 import datetime
 import email
 import email.parser
+import errno
 import hashlib
 import io
 import itertools
@@ -1096,7 +1097,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                             self.logger.info("Received file %(filename)s", { "filename": filename })
                             if not "/" in filename:
                                 with open(os.path.join(self.mapped_path, filename), "w") as outfile:
-                                    outfile.write(part.get_payload())
+                                    data = StringIO.StringIO(part.get_payload())
+                                    fd_copy(data, outfile, -1)
                     self.send_header("302 Found", { "Location": path, "Content-Length": 0 })
                     return
 
@@ -1596,6 +1598,16 @@ def file_read(fileobj, amount):
     else:
         return fileobj.read(amount)
 
+def file_write(fileobj, data):
+    while True:
+        try:
+            fileobj.write(data)
+        except IOError as e:
+            if e.errno == errno.EINTR:
+                continue
+            raise
+        break
+
 def fd_copy(source_file, target_file, length):
     "Copy length bytes from source_file to target_file"
     buffer = 10240
@@ -1605,14 +1617,14 @@ def fd_copy(source_file, target_file, length):
             if not data:
                 break
             if target_file:
-                target_file.write(data)
+                file_write(target_file, data)
     else:
         while length > 0:
             data = file_read(source_file, min(buffer, min(length, 10240)))
             if not data:
                 raise IOError("Failed to read data")
             if target_file:
-                target_file.write(data)
+                file_write(target_file, data)
             length -= len(data)
 
 def setup_tcp_server(handler_class, base_port=("", 1234), options={}):
