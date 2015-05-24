@@ -1229,7 +1229,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                         res_type = "<D:resourcetype><D:collection/></D:resourcetype>"
                     else:
                         res_type = "<D:resourcetype/><D:getcontentlength>%d</D:getcontentlength>" % (stat.st_size, )
-                    response.write("<D:response><D:href>%s%s%s</D:href><D:propstat><D:prop>%s</D:prop><D:status>HTTP/1.1 200 Ok</D:status></D:propstat></D:response>\r\n" % (self.path, "/" if self.path[-1] != "/" else "", file_name, res_type))
+                    response.write("<D:response><D:href>%s%s%s</D:href><D:propstat><D:prop>%s</D:prop><D:status>HTTP/1.1 200 Ok</D:status></D:propstat></D:response>\r\n" % \
+                                   (urllib.quote(self.path), "/" if self.path[-1] != "/" else "", urllib.quote(file_name), res_type))
             else:
                 try:
                     stat = os.stat(self.mapped_path)
