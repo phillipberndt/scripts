@@ -692,6 +692,22 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         <form method="post" enctype="multipart/form-data"><h2>Upload</h2><input type=file multiple name=file><input type=submit name=upload value="Upload"></form>
         <div id="upload_progress"><br/></div>
         <script>
+            var _xhr_lock = [];
+            function xhr_process(action) {
+                if(typeof action == "undefined") {
+                    _xhr_lock.shift();
+                    if(_xhr_lock.length > 0) {
+                        _xhr_lock[0]();
+                    }
+                }
+                else {
+                    _xhr_lock.push(action);
+                    if(_xhr_lock.length == 1) {
+                        action();
+                    }
+                }
+            }
+
             function upload(file) {
                 var progress = document.createElement("div");
                 progress.innerHTML = "<strong>" + file.name.replace(/</g, "&lt;").replace(/&/g, "&amp;") + "</strong>: <span><progress>0%</progress></span>";
@@ -704,19 +720,22 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     setTimeout(function() {
                         progress.remove();
                     }, 5000);
+                    xhr_process();
                 };
                 xhr.upload.onprogress = function(e) {
-                console.log(e);
                     var percent = 100 * e.loaded / e.total;
                     progress.querySelector("span").innerHTML = "<progress value=" + (percent / 100) + ">" + Math.round(percent, 2) + "%</progress>";
                 }
                 xhr.onerror = function() {
                     progress.querySelector("span").innerHTML = "failed";
+                    xhr_process();
                 }
                 var data = new FormData();
                 data.append("file", file, file.name);
                 data.append("upload", "Upload");
-                xhr.send(data);
+                xhr_process(function() {
+                    xhr.send(data);
+                });
             }
 
             document.querySelector("form").addEventListener("submit", function(e) {
@@ -1077,7 +1096,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 fp.feed("Content-Type: %s\r\n\r\n" % (self.headers["content-type"][0]))
                 body = self.get_http_body_reader()
                 while True:
-                    data = body.read(10240)
+                    data = body.read(1024 ** 2)
                     if not data:
                         break
                     fp.feed(data)
