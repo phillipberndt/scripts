@@ -132,3 +132,9 @@ Contents:
   Wait for some kind and event and then execute a command. Event types include
   inotify events (file changes), network throughput measurements, or that a certain
   process exits.
+
+* pskill
+
+  A interactive pkill variant. Sends SIGKILL automatically if SIGTERM fails,
+  previews which processes it will kill, regex and fuzzy matching on full
+  cmdline.
