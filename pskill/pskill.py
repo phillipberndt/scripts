@@ -56,7 +56,7 @@ def re_search(proc_list, regex):
     for entry in proc_list:
         match = re.search(regex, entry["cmd_line"], re.I)
         if match:
-            match_str = (entry["cmd_line"][:match.start()], Highlight(match.group(0)), entry["cmd_line"][match.end()+1:])
+            match_str = (entry["cmd_line"][:match.start()], Highlight(match.group(0)), entry["cmd_line"][match.end():])
             yield dict(entry, match_str=match_str)
 
 
