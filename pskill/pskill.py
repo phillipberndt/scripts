@@ -154,7 +154,9 @@ def main():
     try:
         cand_text = ""
         while True:
-            sys.stdout.write("".join((TEXT_ERASE, TEXT_BOLD, ">>> ", TEXT_DEFAULT, inp, "\n", cand_text,
+            sys.stdout.write("".join((TEXT_ERASE, TEXT_BOLD, ">>> ", TEXT_DEFAULT,
+                                      inp if sys.version >= '3' else inp.encode(sys.getfilesystemencoding()),
+                                      "\n", cand_text,
                                       "\033[%d;%dH" % (1, 5 + len(inp)))))
             sys.stdout.flush()
             if hasattr(sys.stdin, "buffer"):
