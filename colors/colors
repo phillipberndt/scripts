@@ -1,0 +1,34 @@
+#!/usr/bin/env python
+import random
+import sys
+
+for i in range(30, 38):
+	j = i + 10
+        if i < 10:
+            print "",
+	print "\\033[%dm \033[%dm gives this           \033[0m" % (i, i),
+	print "\\033[%dm \033[%dm gives this\033[0m" % (j, j)
+
+for i in [1,2,4,5]:
+        if i < 10:
+            print "",
+	print "\\033[%dm \033[%dm gives this           \033[0m" % (i, i)
+
+if len(sys.argv) == 1:
+    print "Append 256 for more"
+else:
+    if sys.argv[1] == "256":
+        for i in range(0,256,5):
+            line = ""
+            for j in range(i, i+5):
+                line += "\\033[38;5;%03dm \033[38;5;%03dm gives this         \033[0m   " % (i, i)
+            print line
+    def r(stri):
+        o = ""
+        for c in stri:
+            o += "\033[38;2;%d;%d;%dm%s\033[0m" % (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), c)
+        return o
+    print "or use \\033[38;2;R;G;Bm: ", r("like this :)") + "\033[0m"
+
+print
+print

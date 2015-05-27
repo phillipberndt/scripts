@@ -138,3 +138,8 @@ Contents:
   A interactive pkill variant. Sends SIGKILL automatically if SIGTERM fails,
   previews which processes it will kill, regex and fuzzy matching on full
   cmdline.
+
+* colors
+
+ Small tool to output the different console codes for the various colors.
+ I tend to forget them all the time.
