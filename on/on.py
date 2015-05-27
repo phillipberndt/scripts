@@ -269,13 +269,15 @@ if has_opencv:
         PREFIX = "movement"
 
         def __init__(self, parameter):
-            self.cam = cv2.VideoCapture(0)
+            with SupressOutput() as _:
+                self.cam = cv2.VideoCapture(0)
             status(0, "movement", "Waiting for movement")
 
         def grab_frame(self):
             frame = self.cam.read()[1]
             while frame is None:
-                self.cam = cv2.VideoCapture(0)
+                with SupressOutput() as _:
+                    self.cam = cv2.VideoCapture(0)
                 frame = self.cam.read()[1]
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
             return frame
@@ -399,6 +401,23 @@ def is_executable(file_name):
         if os.access(os.path.join(path, file_name), os.X_OK | os.F_OK):
             return True
     return False
+
+
+class SupressOutput(object):
+    def __enter__(self):
+        self.stdout_fd = sys.stdout.fileno()
+        self.stderr_fd = sys.stderr.fileno()
+        self.stdout_dup = os.dup(self.stdout_fd)
+        self.stderr_dup = os.dup(self.stderr_fd)
+        self.null = open("/dev/null", "r+")
+        os.dup2(self.null.fileno(), self.stdout_fd)
+        os.dup2(self.null.fileno(), self.stderr_fd)
+
+    def __exit__(self, type, value, traceback):
+        os.dup2(self.stdout_dup, self.stdout_fd)
+        os.dup2(self.stderr_dup, self.stderr_fd)
+        os.close(self.stdout_dup)
+        os.close(self.stderr_dup)
 
 def main():
     try:
