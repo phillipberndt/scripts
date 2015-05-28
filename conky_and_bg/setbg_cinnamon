@@ -11,6 +11,12 @@ import os
 import random
 import re
 import time
+try:
+    import numpy as np
+    import scipy.interpolate
+    CAN_DO_GRADIENTS=True
+except:
+    CAN_DO_GRADIENTS=False
 
 imgdir = os.path.expanduser("~/.bg/")
 randr = os.popen("xrandr -q").read()
@@ -47,7 +53,20 @@ for no in range(len(screens)):
 	if output_size[0] + output_left > screen[0]:
 		image = image.crop([ 0, 0, screen[0] - output_left, image.size[1]])
 
-	draw.rectangle([ screen[2], 0, screen[2] + screen[0], max_height ], fill=(0, 0, 0))
+        if CAN_DO_GRADIENTS:
+            np_img = np.array(image)
+            top_left_avg = np.apply_over_axes(np.mean, np_img[:50, :50], [0, 1]).reshape(3)
+            top_right_avg = np.apply_over_axes(np.mean, np_img[-50:, :50], [0, 1]).reshape(3)
+            btm_left_avg = np.apply_over_axes(np.mean, np_img[:50, -50:], [0, 1]).reshape(3)
+            btm_right_avg = np.apply_over_axes(np.mean, np_img[-50:, -50:], [0, 1]).reshape(3)
+            interps = [ scipy.interpolate.interp2d([0, screen[0], 0, screen[0]], [0, 0, screen[1], screen[1]], [ top_left_avg[col], btm_left_avg[col], top_right_avg[col], btm_right_avg[col]]) for col in range(3) ]
+            xx = np.arange(screen[0])
+            yy = np.arange(screen[1])
+            np_gradient = np.rollaxis(np.array([interps[col](xx, yy) for col in range(3)]), 0, 3)
+            gradient = PIL.Image.fromarray(np_gradient.astype(np.uint8))
+            output.paste(gradient, (screen[2], 0))
+        else:
+            draw.rectangle([ screen[2], 0, screen[2] + screen[0], max_height ], fill=(0, 0, 0))
 	output.paste(image.resize(output_size), (screen[2] + output_left, output_top))
 
 os.system("rm -f /tmp/setbg_cinnamon_%d_*" % os.getuid())
@@ -55,3 +74,4 @@ filename = "/tmp/setbg_cinnamon_%d_%d.png" % (os.getuid(), time.time())
 output.save(filename)
 
 os.system('dconf write "/org/cinnamon/desktop/background/picture-uri" "\'file://%s\'"' % filename)
+os.system('dconf write "/org/cinnamon/desktop/background/picture-options" "\'spanned\'"')
