@@ -42,8 +42,8 @@ def query_procfs(pid):
 
 def get_x11_list(for_uid=None):
     try:
-        import Xlib.display
         import socket
+        import Xlib.display
 
         dpy = Xlib.display.Display()
     except:
@@ -63,6 +63,8 @@ def get_x11_list(for_uid=None):
             continue
         pid = pid.value[0]
         name = wnd.get_wm_name()
+        if sys.version < '3':
+            name = name.encode("utf8")
 
         data = query_procfs(pid)
         if data and (for_uid is None or for_uid == 0 or data["owner"] == for_uid):
