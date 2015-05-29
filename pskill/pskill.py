@@ -27,16 +27,18 @@ class Highlight(str):
         return "*%s*" % (str(self),)
 
 def query_procfs(pid):
-    cmd_file = os.path.join("/proc/", str(pid), "cmdline")
     if sys.version < '3' and isinstance(pid, long):
         pid = int(pid)
+    cmd_file = os.path.join("/proc/", str(pid), "cmdline")
+    status_file = os.path.join("/proc/", str(pid), "status")
     if (isinstance(pid, int) or pid.isdigit()) and os.access(cmd_file, os.R_OK):
         pid = int(pid)
         if pid == os.getpid():
             return None
         cmd_line = " ".join(('"%s"' % x.replace('"', r'\"') if " " in x else x.replace('"', r'\"') \
                              for x in open(cmd_file).read().split("\0")))
-        owner = os.stat(cmd_file).st_uid
+
+        owner = int([x for x in open(status_file).readlines() if x.startswith("Uid:")][0].split()[1])
         return {"pid": pid, "cmd_line": cmd_line, "owner": owner}
     return None
 
