@@ -9,6 +9,8 @@ import sys
 import termios
 import time
 
+from itertools import chain
+
 TEXT_RED = "\033[31m"
 TEXT_GREEN = "\033[32m"
 TEXT_YELLOW = "\033[33m"
@@ -24,20 +26,57 @@ class Highlight(str):
     def __repr__(self):
         return "*%s*" % (str(self),)
 
+def query_procfs(pid):
+    cmd_file = os.path.join("/proc/", str(pid), "cmdline")
+    if sys.version < '3' and isinstance(pid, long):
+        pid = int(pid)
+    if (isinstance(pid, int) or pid.isdigit()) and os.access(cmd_file, os.R_OK):
+        pid = int(pid)
+        if pid == os.getpid():
+            return None
+        cmd_line = " ".join(('"%s"' % x.replace('"', r'\"') if " " in x else x.replace('"', r'\"') \
+                             for x in open(cmd_file).read().split("\0")))
+        owner = os.stat(cmd_file).st_uid
+        return {"pid": pid, "cmd_line": cmd_line, "owner": owner}
+    return None
+
+def get_x11_list(for_uid=None):
+    try:
+        import Xlib.display
+        import socket
+
+        dpy = Xlib.display.Display()
+    except:
+        return
+
+    pid_atom = dpy.get_atom("_NET_WM_PID")
+    cl_atom = dpy.get_atom("_NET_CLIENT_LIST")
+    hostname = socket.gethostname()
+
+    for wnd_id in dpy.screen().root.get_property(cl_atom, 0, 0, 10000).value:
+        wnd = dpy.create_resource_object("window", wnd_id)
+        host = wnd.get_wm_client_machine()
+        if host != hostname:
+            continue
+        pid = wnd.get_property(pid_atom, 0, 0, 4)
+        if not pid:
+            continue
+        pid = pid.value[0]
+        name = wnd.get_wm_name()
+
+        data = query_procfs(pid)
+        if data and (for_uid is None or for_uid == 0 or data["owner"] == for_uid):
+            data["cmd_line"] = "%s [%s]" % (data["cmd_line"], name)
+            yield data
+
 def get_proc_list(for_uid=None):
     for pid in os.listdir("/proc/"):
-        cmd_file = os.path.join("/proc/", pid, "cmdline")
-        if pid.isdigit() and os.access(cmd_file, os.R_OK):
-            pid = int(pid)
-            if pid == os.getpid():
-                continue
-            cmd_line = " ".join(('"%s"' % x.replace('"', r'\"') if " " in x else x.replace('"', r'\"') \
-                                 for x in open(cmd_file).read().split("\0")))
-            owner = os.stat(cmd_file).st_uid
-            if for_uid is not None and for_uid != 0:
-                if owner != for_uid:
-                    continue
-            yield {"pid": pid, "cmd_line": cmd_line, "owner": owner}
+        data = query_procfs(pid)
+        if data and (for_uid is None or for_uid == 0 or data["owner"] == for_uid):
+            yield data
+
+def get_proc_lists(for_uid=None):
+    return chain(get_proc_list(for_uid), get_x11_list(for_uid))
 
 def fuzzy_search(proc_list, search_str):
     search_str = search_str.lower()
@@ -164,7 +203,7 @@ def main_interactive(proc_list=None, initial_inp=""):
         print("Interactive mode requires a TTY on stdin/stdout")
         return
 
-    proc_list = proc_list or tuple(get_proc_list(os.getuid()))
+    proc_list = proc_list or tuple(get_proc_lists(os.getuid()))
     inp = initial_inp
 
     sys.stdout.write("".join((TEXT_TO_ALTERNATE, TEXT_BOLD, ">>> ", TEXT_DEFAULT)))
@@ -234,9 +273,9 @@ def main_interactive(proc_list=None, initial_inp=""):
     gentle_kill(candidates)
 
 if __name__ == '__main__':
-    if sys.argv > 1:
+    if len(sys.argv) > 1:
         inp = " ".join(sys.argv[1:])
-        proc_list = tuple(get_proc_list(os.getuid()))
+        proc_list = tuple(get_proc_lists(os.getuid()))
         candidates = list(generic_search(proc_list, inp))
         if len(candidates) < 2:
             gentle_kill(candidates)
