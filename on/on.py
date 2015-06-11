@@ -374,7 +374,7 @@ def status(level, component, line, is_update=False):
     else:
         col = "31"
     up = "" if not is_update else "\033[1F\033[K"
-    print "%s[\033[%sm%s\033[0m] %s" % (up, col, component, line)
+    print "%s[\033[1;%sm%s\033[0m] %s" % (up, col, component, line)
 
 def readline_timout(query, default, timeout=0, expect=None):
     class _TimeoutError(Exception):
