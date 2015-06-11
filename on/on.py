@@ -4,12 +4,14 @@ import getopt
 import glob
 import os
 import re
+import select
 import signal
 import socket
 import struct
 import subprocess
 import sys
 import time
+import threading
 
 class OnEvent(object):
     DESCRIPTION = "sample description"
@@ -402,7 +404,6 @@ def is_executable(file_name):
             return True
     return False
 
-
 class SupressOutput(object):
     def __enter__(self):
         self.stdout_fd = sys.stdout.fileno()
@@ -418,6 +419,34 @@ class SupressOutput(object):
         os.dup2(self.stderr_dup, self.stderr_fd)
         os.close(self.stdout_dup)
         os.close(self.stderr_dup)
+
+def format_output_thread(stdout, stderr):
+    class Quit(Exception):
+        pass
+
+    bufs = ["", ""]
+    def _pbufs(force):
+        for idn, out in enumerate((stdout, stderr)):
+            if "\n" in bufs[idn]:
+                lines = bufs[idn].split("\n")
+                if not force:
+                    bufs[idn] = lines.pop()
+                for line in lines:
+                    print "\033[0;%dm>>>\033[0m" % (32 if out is stdout else 31), line
+
+    try:
+        while True:
+            rlist, _, _ = select.select((stdout, stderr), (), ())
+            for idn, out in enumerate((stdout, stderr)):
+                if out in rlist:
+                    read = os.read(out.fileno(), 1024**2)
+                    if not read:
+                        raise Quit()
+                    bufs[idn] += read
+                    _pbufs(False)
+    except Quit:
+        _pbufs(True)
+        status(0, "on", "Program has exited.")
 
 def main():
     try:
@@ -466,9 +495,11 @@ def main():
                 proc.kill()
         if action:
             if is_executable(action[0]):
-                proc = subprocess.Popen(action)
+                proc = subprocess.Popen(action, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             else:
-                proc = subprocess.Popen(action, shell=True)
+                proc = subprocess.Popen(action, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            proc_thread = threading.Thread(target=format_output_thread, args=(proc.stdout, proc.stderr))
+            proc_thread.start()
             if "-w" in opts:
                 proc.wait()
         if "-r" not in opts:
