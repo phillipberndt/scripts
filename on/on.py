@@ -420,9 +420,12 @@ class SupressOutput(object):
         os.close(self.stdout_dup)
         os.close(self.stderr_dup)
 
-def format_output_thread(stdout, stderr):
+def format_output_thread(proc):
     class Quit(Exception):
         pass
+
+    stdout = proc.stdout
+    stderr = proc.stderr
 
     bufs = ["", ""]
     def _pbufs(force):
@@ -446,7 +449,10 @@ def format_output_thread(stdout, stderr):
                     _pbufs(False)
     except Quit:
         _pbufs(True)
-        status(0, "on", "Program has exited.")
+        if proc.wait() == 0:
+            status(0, "on", "Program has exited.")
+        else:
+            status(1, "on", "Program exited with code %d" % (proc.returncode,))
 
 def main():
     try:
@@ -498,7 +504,7 @@ def main():
                 proc = subprocess.Popen(action, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             else:
                 proc = subprocess.Popen(action, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            proc_thread = threading.Thread(target=format_output_thread, args=(proc.stdout, proc.stderr))
+            proc_thread = threading.Thread(target=format_output_thread, args=(proc, ))
             proc_thread.start()
             if "-w" in opts:
                 proc.wait()
