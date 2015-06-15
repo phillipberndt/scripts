@@ -103,6 +103,9 @@ if has_pyinotify:
                 self.wm.add_watch(file_name, pyinotify.IN_CLOSE_WRITE, rec=True)
             status(0, "inotify", "Watching %d files" % len(files))
 
+        def __del__(self):
+            self.wm.close()
+
         def wait_for_event(self):
             notifier = pyinotify.Notifier(self.wm)
             notifier.process_events()
