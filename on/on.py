@@ -356,6 +356,7 @@ def print_help():
     print "  -k   Kill old action if it is retriggered too fast"
     print "  -r   Repeat action"
     print "  -w   Wait for action to complete before running it again"
+    print "  -o   Neatly format the action's output"
     print
     print "Event types:"
     for cls in sorted(OnEvent.__subclasses__(), key=lambda x: x.PREFIX):
@@ -456,7 +457,7 @@ def format_output_thread(proc):
 
 def main():
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "krw")
+        opts, args = getopt.getopt(sys.argv[1:], "krwo")
         opts = dict(opts)
         event = args[0]
         parameter = None
@@ -489,6 +490,7 @@ def main():
         print "Unknown event type."
         sys.exit(1)
 
+    ptarget = subprocess.PIPE if "-o" in opts else None
     proc = None
     while True:
         instance = handler(parameter)
@@ -498,16 +500,22 @@ def main():
         if "-k" in opts and proc:
             if proc.poll() is None:
                 status(1, "on", "Killing old action instance %d" % proc.pid)
-                proc.kill()
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                proc.terminate()
+                proc.wait()
         if action:
             if is_executable(action[0]):
-                proc = subprocess.Popen(action, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                proc = subprocess.Popen(action, stdout=ptarget, stderr=ptarget, preexec_fn=os.setsid)
             else:
-                proc = subprocess.Popen(action, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            proc_thread = threading.Thread(target=format_output_thread, args=(proc, ))
-            proc_thread.start()
-            if "-w" in opts:
-                proc.wait()
+                proc = subprocess.Popen(action, shell=True, stdout=ptarget, stderr=ptarget, preexec_fn=os.setsid)
+            if ptarget:
+                proc_thread = threading.Thread(target=format_output_thread, args=(proc, ))
+                proc_thread.start()
+                if "-w" in opts:
+                    proc.wait()
+            else:
+                if "-w" in opts:
+                    proc.communicate()
         if "-r" not in opts:
             break
 
