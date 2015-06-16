@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # encoding: utf-8
+import fnmatch
 import getopt
-import glob
 import os
 import re
 import select
@@ -10,8 +10,8 @@ import socket
 import struct
 import subprocess
 import sys
-import time
 import threading
+import time
 
 class OnEvent(object):
     DESCRIPTION = "sample description"
@@ -98,10 +98,15 @@ if has_inotify:
 
         def __init__(self, parameter):
             self.ino = inotify.adapters.Inotify()
-            files = glob.glob(parameter)
-            for file_name in files:
-                self.add_path(file_name)
-            status(0, "inotify", "Watching %d files" % len(files))
+            self.globmatch = None
+            if "*" in parameter:
+                self.globmatch = parameter
+                path = os.path.dirname(parameter.split("*", 1)[0])
+                self.add_path(path)
+                status(0, "inotify", "Watching for %s in folder %s" % (parameter, path))
+            else:
+                self.add_path(parameter)
+                status(0, "inotify", "Watching for %s" % parameter)
 
         def add_path(self, path):
             self.ino.add_watch(path, inotify.constants.IN_CLOSE_WRITE | inotify.constants.IN_CREATE)
@@ -116,8 +121,9 @@ if has_inotify:
                 if event is not None:
                     header, type_names, fdir, filename = event
                     path = os.path.join(fdir, filename)
-                    status(0, "inotify", "%s updated" % path, True)
-                    break
+                    if self.globmatch is None or fnmatch.fnmatch(path, self.globmatch):
+                        status(0, "inotify", "%s updated" % path, True)
+                        break
             return path
 # }}}
 # Network throughput {{{
