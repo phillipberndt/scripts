@@ -85,34 +85,39 @@ class OnPIDExit(OnEvent):
 # }}}
 # Inotify event {{{
 try:
-    import pyinotify
-    has_pyinotify = True
+    import inotify.adapters
+    has_inotify = True
 except:
-    has_pyinotify = False
+    has_inotify = False
 
-if has_pyinotify:
+if has_inotify:
     class OnFileChange(OnEvent):
         DESCRIPTION = "Wait for a file or directory to change"
         PREFIX = "inotify"
         PARAMETER_DESCRIPTION = "file"
 
         def __init__(self, parameter):
-            self.wm = pyinotify.WatchManager()
+            self.ino = inotify.adapters.Inotify()
             files = glob.glob(parameter)
             for file_name in files:
-                self.wm.add_watch(file_name, pyinotify.IN_CLOSE_WRITE, rec=True)
+                self.add_path(file_name)
             status(0, "inotify", "Watching %d files" % len(files))
 
-        def __del__(self):
-            self.wm.close()
+        def add_path(self, path):
+            self.ino.add_watch(path, inotify.constants.IN_CLOSE_WRITE | inotify.constants.IN_CREATE)
+            if os.path.isdir(path):
+                for elem in os.listdir(path):
+                    sub_path = os.path.join(path, elem)
+                    if os.path.isdir(sub_path):
+                        self.add_path(sub_path)
 
         def wait_for_event(self):
-            notifier = pyinotify.Notifier(self.wm)
-            notifier.process_events()
-            notifier.check_events()
-            notifier.read_events()
-            path = notifier._sys_proc_fun(notifier._eventq[0]).pathname
-            status(0, "inotify", "%s updated" % path, True)
+            for event in self.ino.event_gen():
+                if event is not None:
+                    header, type_names, fdir, filename = event
+                    path = os.path.join(fdir, filename)
+                    status(0, "inotify", "%s updated" % path, True)
+                    break
             return path
 # }}}
 # Network throughput {{{
