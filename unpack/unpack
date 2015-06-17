@@ -735,7 +735,7 @@ def hookSCPDownload(file):
 		targetFile = os.path.basename(file)
 		if os.access(targetFile, os.F_OK):
 			counter = 0
-			while os.access("%d-%s" % (counter, targetFile)):
+			while os.access("%d-%s" % (counter, targetFile), os.F_OK):
 				counter += 1
 			targetFile = "%d-%s" % (counter, targetFile)
 		if os.system("scp %s %s" % (se(file), se(targetFile))) != 0:
