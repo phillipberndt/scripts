@@ -114,6 +114,39 @@ mktmp() {
 	rm -rf $TDIR
 }
 [ -z $IS_TMP_SUBSHELL ] || export PS1="[tmp] $PS1"
+mna() {
+	if [ $# -ne 1 ]; then
+		echo "Add mneoric for current directory"
+		echo "Syntax: mna <name>"
+		return
+	fi
+	mneoric=$1
+	if [ -e ~/.zsh/mneorics ] && grep -q "^${mneoric}" ~/.zsh/mneorics; then
+		echo "mneoric ${mneoric} was previously assinged to $(grep "^${mneoric}" ~/.zsh/mneorics | cut -f 2)" >&2
+	fi
+	OLD_CONTENTS=$([ -e ~/.zsh/mneorics ] && grep -v "^${mneoric}" ~/.zsh/mneorics)
+	(
+		echo "${mneoric}\t$(pwd)"
+		echo $OLD_CONTENTS
+	) > ~/.zsh/mneorics
+}
+mncd() {
+	if [ $# -ne 1 ]; then
+		echo "Goto directory by mneoric"
+		echo "Syntax: mncd <name>"
+		return
+	fi
+	mneoric=$1
+	TARGET=
+	if [ -e ~/.zsh/mneorics ]; then
+		TARGET="$(grep "^${mneoric}" ~/.zsh/mneorics | cut -f 2)"
+	fi
+	if [ -z "$TARGET" ]; then
+		echo "Not found: ${mneoric}" >&2
+		return 1
+	fi
+	cd $TARGET
+}
 
 # Hook: Local .zshrc's
 set -A _chpwd_local_zshrc_cache

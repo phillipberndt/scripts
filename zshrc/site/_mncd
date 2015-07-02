@@ -1,0 +1,9 @@
+#compdef mncd
+#
+# Completion file for mncd
+#
+
+_mncd() {
+	compadd $(cut -f 1 ~/.zsh/mneorics)
+}
+_mncd "$@"
