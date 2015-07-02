@@ -146,6 +146,7 @@ mncd() {
 		return 1
 	fi
 	cd $TARGET
+	unset TARGET
 }
 
 # Hook: Local .zshrc's
