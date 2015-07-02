@@ -4,6 +4,8 @@
 #
 
 _mncd() {
-	compadd $(cut -f 1 ~/.zsh/mneorics)
+	local -a args
+	args=($(tr "\t" ":" < ~/.zsh/mneorics))
+	_describe "values" args
 }
 _mncd "$@"
