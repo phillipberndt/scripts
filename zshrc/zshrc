@@ -150,14 +150,15 @@ mncd() {
 # Hook: Local .zshrc's
 set -A _chpwd_local_zshrc_cache
 _chpwd_local_zshrc() {
-	[ -e .zshrc.local ] || return
+	[ -e ".zshrc.local" ] || return
 	
 	# Check if this file has already been sourced
-	local last_mod=$(stat -c %Y .zshrc.local)
-	local full_path=$(pwd)/.zshrc.local
+	local last_mod=$(stat -c %Y ".zshrc.local")
+	local full_path="$(pwd)/.zshrc.local"
 	local at_index=-1
 	local index=-1
 	local unchanged=1
+	local shasum
 	for name mtime in $_chpwd_local_zshrc_cache; do
 		((index+=1))
 		if [ "$name" = "$full_path" ]; then
@@ -176,7 +177,7 @@ _chpwd_local_zshrc() {
 	fi
 
 	# Check if this file is well-known
-	local shasum=$(sha1sum .zshrc.local)
+	shasum=$(sha1sum ".zshrc.local")
 
 	if ! grep -q $shasum ~/.zsh/local_zshrc_shasums &> /dev/null; then
 		while true; do
@@ -185,11 +186,11 @@ _chpwd_local_zshrc() {
 			read -s -k 1 action
 			echo -n "\033[2A\r\033[J"
 			if [ "$action" = "e" ]; then
-				$EDITOR .zshrc.local
+				$EDITOR ".zshrc.local"
 			elif [ "$action" = "r" ]; then
 				echo $shasum $full_path >> ~/.zsh/local_zshrc_shasums
 				# Source the file
-				source .zshrc.local
+				source ".zshrc.local"
 				break
 			else
 				break
@@ -197,7 +198,7 @@ _chpwd_local_zshrc() {
 		done			
 	else
 		# Source the file
-		source .zshrc.local
+		source ".zshrc.local"
 	fi
 }
 add-zsh-hook chpwd _chpwd_local_zshrc
