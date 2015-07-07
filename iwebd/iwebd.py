@@ -989,8 +989,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         if "accept-encoding" in self.headers:
             if has_gzip and "gzip" in ", ".join(self.headers["accept-encoding"]):
                 wrapper.append(lambda f: GzipWrapper(mode="w", fileobj=f))
-                headers["Content-Encoding"] = "gzip"
-        headers["Transfer-Encoding"] = ", ".join(te_header)
+                headers["Content-Encoding"] = [ "gzip" ]
+        headers["Transfer-Encoding"] = [ ", ".join(te_header) ]
         self.send_header(status, headers)
         return reduce(lambda x, y: y(x), wrapper, self.wfile if self.method.lower() != "head" else StringIO.StringIO())
 
@@ -1047,7 +1047,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             if not cgi_header:
                 break
             if cgi_header[0].isspace():
-                cgi_headers[last_header].append(cgi_header.strip())
+                cgi_headers[last_header][-1] += "\n %s" % cgi_header.strip()
             else:
                 last_header, value = cgi_header.split(":", 1)
                 last_header = last_header.lower()
@@ -1057,12 +1057,12 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     cgi_headers[last_header] = [ value.strip() ]
 
         status = "200 Ok" if "status" not in cgi_headers else cgi_headers["status"][0]
-        headers = { ucparts(key): ", ".join(value) for key, value in cgi_headers.items() if key != "status" }
+        headers = { ucparts(key): value for key, value in cgi_headers.items() if key != "status" }
         if "Content-Type" not in headers:
-            headers["Content-Type"] = "text/html"
+            headers["Content-Type"] = [ "text/html" ]
 
         stdout = cgi_process.stdout
-        if self.options["live_reload_enabled"] and headers["Content-Type"].startswith("text/html"):
+        if self.options["live_reload_enabled"] and headers["Content-Type"][0].startswith("text/html"):
             stdout = EmbedLivereloadWrapper(stdout)
             if "content-length" in cgi_headers:
                 del cgi_headers["content-length"]
