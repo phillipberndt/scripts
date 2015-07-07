@@ -1354,7 +1354,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                         live_reload_add_watch(path)
             else:
                 live_reload_add_watch(".", rec=True)
-            self.send_header("200 Ok", { "Content-Type": "text/event-stream; charset=utf8", "Cache-Control": "no-cache" })
+            self.send_header("200 Ok", { "Content-Type": "text/event-stream; charset=UTF-8", "Cache-Control": "no-cache", "Connection": "close" })
             def _handle(event):
                 if urls and event.pathname not in urls:
                     return
