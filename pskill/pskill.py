@@ -35,7 +35,7 @@ def query_procfs(pid):
         pid = int(pid)
         if pid == os.getpid():
             return None
-        cmd_line = " ".join(('"%s"' % x.replace('"', r'\"') if " " in x else x.replace('"', r'\"') \
+        cmd_line = " ".join((u'"%s"' % x.replace('"', r'\"') if " " in x else x.replace('"', r'\"') \
                              for x in open(cmd_file).read().split("\0")))
 
         owner = int([x for x in open(status_file).readlines() if x.startswith("Uid:")][0].split()[1])
@@ -53,6 +53,7 @@ def get_x11_list(for_uid=None):
 
     pid_atom = dpy.get_atom("_NET_WM_PID")
     cl_atom = dpy.get_atom("_NET_CLIENT_LIST")
+    wm_name_atom = dpy.get_atom("_NET_WM_NAME")
     hostname = socket.gethostname()
 
     for wnd_id in dpy.screen().root.get_property(cl_atom, 0, 0, 10000).value:
@@ -64,13 +65,11 @@ def get_x11_list(for_uid=None):
         if not pid:
             continue
         pid = pid.value[0]
-        name = wnd.get_wm_name()
-        if sys.version < '3':
-            name = name.encode("utf8")
+        name = wnd.get_property(wm_name_atom, 0, 0, 10000).value
 
         data = query_procfs(pid)
         if data and (for_uid is None or for_uid == 0 or data["owner"] == for_uid):
-            data["cmd_line"] = "%s [%s]" % (data["cmd_line"], name)
+            data["cmd_line"] = u"%s [%s]" % (data["cmd_line"], name)
             yield data
 
 def get_proc_list(for_uid=None):
@@ -115,22 +114,22 @@ def generic_search(proc_list, inp):
         return fuzzy_search(proc_list, inp)
 
 def format_output(candidate, width=None, additional_format=""):
-    global_format = "%s%s" % (TEXT_DEFAULT, additional_format)
+    global_format = u"%s%s" % (TEXT_DEFAULT, additional_format)
     match_str = []
     if candidate["owner"] != os.getuid():
-        global_format = "%s%s" % (TEXT_DEFAULT, TEXT_HALF_BRIGHT)
+        global_format = u"%s%s" % (TEXT_DEFAULT, TEXT_HALF_BRIGHT)
     n = 0
     for part in candidate["match_str"]:
         if width and n + len(part) > width - 9:
             match_str.append(part[:width - 9 - n])
-            match_str.append("…")
+            match_str.append(u"…")
             break
         n += len(part)
         if isinstance(part, Highlight):
             match_str += (TEXT_RED, part, global_format)
         else:
             match_str.append(part)
-    return "%s%5d %s" % (global_format, candidate["pid"], "".join(match_str))
+    return u"%s%5d %s" % (global_format, candidate["pid"], u"".join(match_str))
 
 def get_term_size():
     height, width = struct.unpack('hh', fcntl.ioctl(sys.stdin.fileno(), termios.TIOCGWINSZ, '1234'))
