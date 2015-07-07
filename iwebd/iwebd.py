@@ -764,7 +764,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     """
 
     LIVE_RELOAD_JS = """
-        document.addEventListener("load", function() {
+        window.addEventListener("load", function(e) {
             var urls = [];
             for(var url of performance.getEntries()) {
                 if(url.name.substring(0, location.protocol.length + 2 + location.host.length) == location.protocol + "//" + location.host) {
@@ -784,7 +784,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     }
                 }
             }
-        }, 500);
+        }, false);
     """
 
     DIRECTORY_ICONS = {
