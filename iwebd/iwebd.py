@@ -1423,6 +1423,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     def handle_htaccess(self):
         """When self.mapped_path is already set, check for .htaccess files that alter the request.
         Currently, only partial mod_rewrite is available."""
+        original_query = "" if "?" not in self.path else self.path[self.path.find("?")+1:]
         path_components = [""] + self.mapped_path.split("/")[len(os.path.abspath(".").split("/")):]
         path_candidate = []
         for part in path_components:
@@ -1469,6 +1470,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                                         self.send_error("302 Found", headers={"Location": new_uri})
                                         return False
                                 self.path_info = ""
+                                if original_query:
+                                    new_uri = "%s%s%s" % (new_uri, "?" if "?" not in new_uri else "&", original_query)
                                 self.path = new_uri
                                 self.mapped_path = self.map_url(new_uri)
                                 if not self.mapped_path:
