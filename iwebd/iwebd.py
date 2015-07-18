@@ -97,6 +97,12 @@ try:
 except:
     has_pyinotify = False
 
+try:
+    import bz2
+    has_bz2 = True
+except:
+    has_bz2 = False
+
 class SSLKey(object):
     "Tiny container for certificate information that can create self-signed temporary certificates on the fly"
     # TODO maybe add ca: Generate CA like cert below, but then leave the -x509 to create req and sign using `openssl x509 -req -in req -CA foo -CAkey bar -CAcreateserial -out crt`
@@ -1084,9 +1090,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
             if "action" in query and query["action"][0] == "download":
                 archive_name = os.path.basename(path).replace('"', r'\"') or "download"
-                headers = { "Content-Type": "application/x-gtar", "Content-Disposition": "attachment; filename=\"%s.tar.bz2\"" % archive_name }
+                headers = { "Content-Type": "application/x-gtar", "Content-Disposition": "attachment; filename=\"%s.tar%s\"" % (archive_name, ".bz2" if has_bz2 else "") }
                 with self.begin_chunked_reply("200 Ok", headers) as wfile:
-                    outfile = tarfile.open(mode="w|bz2", fileobj=wfile, format=tarfile.GNU_FORMAT)
+                    outfile = tarfile.open(mode="w|bz2" if has_bz2 else "w", fileobj=wfile, format=tarfile.GNU_FORMAT)
                     outfile.add(self.mapped_path, "")
                     outfile.close()
                 return
@@ -1131,7 +1137,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     continue
                 full_dirspec = "%s%s/" % (full_dirspec, dirspec)
                 data.append('&raquo; <a href="%s">%s</a>' % (full_dirspec, dirspec))
-            data.append(' (<a href="?action=download">Download as TAR.BZ2</a>)')
+            data.append(' (<a href="?action=download">Download as archive</a>)')
             data.append("</p><ul>")
 
             base = path + ("/" if path[-1] != "/" else "")
