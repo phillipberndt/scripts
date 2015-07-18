@@ -541,6 +541,7 @@ class ChunkWrapper(io.BufferedIOBase):
     def __init__(self, fileobj):
        self.fileobj = fileobj
        self.finalized = False
+       self.offset = 0
 
     def __enter__(self):
         if hasattr(self.fileobj, "__enter__"):
@@ -558,6 +559,7 @@ class ChunkWrapper(io.BufferedIOBase):
         assert not self.finalized
         if data:
             self.fileobj.write("%x\r\n%s\r\n" % (len(data), data))
+            self.offset += len(data)
 
     def flush(self):
         self.fileobj.flush()
@@ -573,6 +575,9 @@ class ChunkWrapper(io.BufferedIOBase):
         if not self.finalized:
             self.fileobj.write("0\r\n\r\n")
             self.finalized = True
+
+    def tell(self):
+        return self.offset
 
 if has_gzip:
     class GzipWrapper(gzip.GzipFile):
