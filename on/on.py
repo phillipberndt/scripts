@@ -52,7 +52,7 @@ class OnPIDExit(OnEvent):
         for pid in os.listdir("/proc"):
             if pid.isdigit():
                 try:
-                    cmdline = " ".join(open(os.path.join("/proc/", pid, "cmdline")).read().split("\0"))
+                    cmdline = " ".join(('"%s"' % x if ' ' in x else x for x in open(os.path.join("/proc/", pid, "cmdline")).read().split("\0")))
                 except IOError:
                     continue
                 pid = int(pid)
