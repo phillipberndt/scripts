@@ -47,13 +47,27 @@ class OnPIDExit(OnEvent):
     def is_alive(pid):
         return os.path.isdir("/proc/%d" % pid) and "zombie" not in open("/proc/%d/status" % pid).read()
 
+    @staticmethod
+    def pgrep(parameter):
+        for pid in os.listdir("/proc"):
+            if pid.isdigit():
+                try:
+                    cmdline = " ".join(open(os.path.join("/proc/", pid, "cmdline")).read().split("\0"))
+                except IOError:
+                    continue
+                pid = int(pid)
+                if pid == os.getpid():
+                    continue
+                if parameter in cmdline:
+                    yield int(pid), cmdline
+
     def __init__(self, parameter):
         try:
             pid_list = [ int(parameter) ]
             if not OnPIDExit.is_alive(pid_list[0]):
                 raise ValueError("PID %d does not belong to an existing process" % pid_list[0])
         except ValueError:
-            processes = dict((x.strip().split(None, 1) for x in subprocess.check_output(["pgrep", "-af", parameter]).split("\n") if x.strip()))
+            processes = dict(OnPIDExit.pgrep(parameter))
             if str(os.getpid()) in processes:
                 del processes[str(os.getpid())]
             if not processes:
