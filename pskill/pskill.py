@@ -98,11 +98,15 @@ def fuzzy_search(proc_list, search_str):
             continue
 
 def re_search(proc_list, regex):
-    for entry in proc_list:
-        match = re.search(regex, entry["cmd_line"], re.I)
-        if match:
-            match_str = (entry["cmd_line"][:match.start()], Highlight(match.group(0)), entry["cmd_line"][match.end():])
-            yield dict(entry, match_str=match_str)
+    try:
+        for entry in proc_list:
+            match = re.search(regex, entry["cmd_line"], re.I)
+            if match:
+                match_str = (entry["cmd_line"][:match.start()], Highlight(match.group(0)), entry["cmd_line"][match.end():])
+                yield dict(entry, match_str=match_str)
+    except re.error:
+        return
+
 
 def generic_search(proc_list, inp):
     if inp and inp[0] == "/":
