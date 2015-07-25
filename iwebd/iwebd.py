@@ -1080,7 +1080,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 del headers["Content-Length"]
         if "content-length" in cgi_headers:
             self.send_header(status, headers)
-            fd_copy(stdout, self.wfile, int(cgi_headers["content-length"]))
+            fd_copy(stdout, self.wfile, int(cgi_headers["content-length"][0]))
         else:
             with self.begin_chunked_reply(status, headers) as wfile:
                 fd_copy(stdout, wfile, -1)
