@@ -65,6 +65,11 @@ cd ..
 ln -s .zsh/zshrc .zshrc
 source .zshrc
 
+# Other dotfiles
+for FILE in .local/_scripts/dotfiles/*; do
+	ln -s $FILE .${FILE:t}
+done
+
 # Initialize Perl CPAN
 wget -O .local/bin/cpanm http://cpanmin.us
 chmod a+x .local/bin/cpanm
