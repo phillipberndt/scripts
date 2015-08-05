@@ -88,7 +88,8 @@ alias mysql="mysql -u root"
 
 # Some functions
 mkc() {
-	local C="$@"
+	local C
+	C="$@"
 	[[ "$C" == "" ]] && C="$(date +'%d.%m')"
 	test -d "$C" || mkdir -p "$C"
 	cd "$C"
@@ -100,7 +101,8 @@ gitup() {
 	done
 }
 mktmp() {
-	local TDIR=/tmp/tmp-$RANDOM
+	local TDIR
+	TDIR=/tmp/tmp-$RANDOM
 	while ! [ -d $TDIR ]; do
 		mkdir -m 0711 $TDIR && break
 		TDIR=/tmp/tmp-$RANDOM
@@ -119,11 +121,13 @@ mna() {
 		echo "Syntax: mna <name>"
 		return
 	fi
-	local mneoric=$1
+	local mneoric
+	mneoric=$1
 	if [ -e ~/.zsh/mneorics ] && grep -q "^${mneoric}" ~/.zsh/mneorics; then
 		echo "mneoric ${mneoric} was previously assinged to $(grep "^${mneoric}" ~/.zsh/mneorics | cut -f 2)" >&2
 	fi
-	local OLD_CONTENTS=$([ -e ~/.zsh/mneorics ] && grep -v "^${mneoric}" ~/.zsh/mneorics)
+	local OLD_CONTENTS
+	OLD_CONTENTS=$([ -e ~/.zsh/mneorics ] && grep -v "^${mneoric}" ~/.zsh/mneorics)
 	(
 		echo "${mneoric}\t$(pwd)"
 		echo $OLD_CONTENTS
@@ -135,8 +139,10 @@ mncd() {
 		echo "Syntax: mncd <name>"
 		return
 	fi
-	local mneoric=$1
-	local TARGET=
+	local mneoric
+	mneoric=$1
+	local TARGET
+	TARGET=
 	if [ -e ~/.zsh/mneorics ]; then
 		TARGET="$(grep "^${mneoric}" ~/.zsh/mneorics | cut -f 2)"
 	fi
@@ -153,8 +159,10 @@ _chpwd_local_zshrc() {
 	[ -e ".zshrc.local" ] || return
 	
 	# Check if this file has already been sourced
-	local last_mod=$(stat -c %Y ".zshrc.local")
-	local full_path="$(pwd)/.zshrc.local"
+	local last_mod
+	last_mod=$(stat -c %Y ".zshrc.local")
+	local full_path
+	full_path="$(pwd)/.zshrc.local"
 	local at_index=-1
 	local index=-1
 	local unchanged=1
