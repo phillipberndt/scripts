@@ -1834,9 +1834,9 @@ def hostportpair(service, string):
 class LogFormatter(logging.Formatter):
     def format(self, record):
         if "ip" in record.args:
-            base = "\033[34m[%s %s] \033[35m%s\033[0m " % (self.formatTime(record, "%H:%I:%S"), record.name, record.args["ip"])
+            base = "\033[34m[%s %s] \033[35m%s\033[0m " % (self.formatTime(record, "%H:%M:%S"), record.name, record.args["ip"])
         else:
-            base = "\033[34m[%s %s] " % (self.formatTime(record, "%H:%I:%S"), record.name)
+            base = "\033[34m[%s %s] " % (self.formatTime(record, "%H:%M:%S"), record.name)
         if record.levelno > logging.WARNING:
             col = 31
         elif record.levelno > logging.DEBUG:
