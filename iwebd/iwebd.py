@@ -206,9 +206,11 @@ class FtpHandler(SocketServer.StreamRequestHandler):
     def connect_data_socket(self):
         "Establish a data connection to the client. Does not handle errors. Handles PASV/PORT for you."
         if not self.data_mode["socket"]:
-            if self.data_mode["mode"] == "PORT":
-                self.data_mode["socket"] = socket.socket()
+            if self.data_mode["mode"] in ("PORT", "EPRT"):
+                self.log(logging.DEBUG, "Open socket for %(target)s to %(port)s", target=self.client_address, port=(self.data_mode["ip"], self.data_mode["port"]))
+                self.data_mode["socket"] = socket.socket(socket.AF_INET6 if self.data_mode["mode"] == "EPRT" else socket.AF_INET)
                 self.data_mode["socket"].connect((self.data_mode["ip"], self.data_mode["port"]))
+                self.log(logging.DEBUG, "Opened socket for %(target)s to %(port)s", target=self.client_address, port=(self.data_mode["ip"], self.data_mode["port"]))
             else:
                 data_socket, remote = self.data_mode["server_socket"].accept()
                 self.log(logging.DEBUG, "Data connection for %(target)s", target=self.client_address)
@@ -378,20 +380,31 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 else:
                     self.reply("200 Fine with me")
                 continue
-            elif command[0] in ("PASV", "PORT"):
+            elif command[0] in ("PASV", "PORT", "EPRT", "EPSV"):
                 for which in ("socket", "server_socket"):
                     if self.data_mode[which]:
                         self.data_mode[which].shutdown(socket.SHUT_RDWR)
                         self.data_mode[which] = None
-                if command[0] == "PASV":
-                    server_socket, port = setup_tcp_server_socket(1234 if "pasv_port" not in self.options else self.options["pasv_port"])
+                if command[0] in ("PASV", "EPSV"):
+                    server_socket, port = setup_tcp_server_socket(1234 if "pasv_port" not in self.options else self.options["pasv_port"],
+                            socket.AF_INET6 if command[0] == "EPSV" else socket.AF_INET)
                     server_socket.listen(1)
                     self.data_mode = { "mode": "PASV", "ip": self.request.getsockname()[0], "port": port, "socket": None, "server_socket": server_socket }
-                    self.reply("227 Entering Passive Mode (%s,%d,%d)." % (self.data_mode["ip"].replace(".", ","), (self.data_mode["port"] & 0xFF00) >> 8, (self.data_mode["port"] & 0x00FF)))
+                    if command[0] == "PASV":
+                        self.reply("227 Entering Passive Mode (%s,%d,%d)." % (self.data_mode["ip"].replace(".", ","), (self.data_mode["port"] & 0xFF00) >> 8, (self.data_mode["port"] & 0x00FF)))
+                    else:
+                        self.reply("229 Entering Extended Passive Mode (|||%d|)" % self.data_mode["port"])
                 else:
-                    port = command[1].split(",")
-                    self.data_mode = { "mode": "PORT", "ip": "%s.%s.%s.%s" % tuple(port[:4]), "port": (int(port[4]) << 8) + int(port[5]), "socket": None, "server_socket": None }
-                    self.reply("200 PORT command successful, connecting to %s:%d" % (self.data_mode["ip"], self.data_mode["port"]))
+                    if command[0] == "PORT":
+                        port = command[1].split(",")
+                        self.data_mode = { "mode": "PORT", "ip": "%s.%s.%s.%s" % tuple(port[:4]), "port": (int(port[4]) << 8) + int(port[5]), "socket": None, "server_socket": None }
+                        self.reply("200 PORT command successful, connecting to %s:%d" % (self.data_mode["ip"], self.data_mode["port"]))
+                    else:
+                        # EPRT format is EPRT<space><d><net-prt><d><net-addr><d><tcp-port><d>, where d is any character
+                        _, _, addr, port, _ = command[1].split(command[1][0])
+                        self.data_mode = { "mode": "EPRT", "ip": addr, "port": int(port), "socket": None, "server_socket": None }
+                        self.reply("200 EPRT command successful, connecting to %s:%d" % (self.data_mode["ip"], self.data_mode["port"]))
+
                 continue
             elif command[0] in ("LIST", "STAT", "NLST"):
                 if len(command) > 1:
@@ -1675,12 +1688,12 @@ def setup_tcp_server(handler_class, base_port=("", 1234), options={}):
     threading.Thread(target=server.serve_forever).start()
     return server, server.socket.getsockname()[:2]
 
-def setup_tcp_server_socket(base_port=1234):
+def setup_tcp_server_socket(base_port=1234, address_family=socket.AF_INET):
     "Setup a TCP socket on a variable path. Returns the instance and the actual port as a tuple."
     counter = 0
     while True:
         try:
-            server = socket.socket()
+            server = socket.socket(address_family)
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             server.bind(('', base_port + counter))
             break
