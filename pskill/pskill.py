@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # encoding: utf-8
 import fcntl
+import io
 import os
 import re
 import signal
@@ -35,8 +36,8 @@ def query_procfs(pid):
         pid = int(pid)
         if pid == os.getpid():
             return None
-        cmd_line = " ".join((u'"%s"' % x.replace('"', r'\"') if " " in x else x.replace('"', r'\"') \
-                             for x in open(cmd_file).read().split("\0")))
+        cmd_line = u" ".join((u'"%s"' % x.replace('"', r'\"') if " " in x else x.replace('"', r'\"') \
+                             for x in io.open(cmd_file).read().split("\0")))
 
         owner = int([x for x in open(status_file).readlines() if x.startswith("Uid:")][0].split()[1])
         return {"pid": pid, "cmd_line": cmd_line, "owner": owner}
