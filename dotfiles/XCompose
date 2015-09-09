@@ -392,16 +392,17 @@ include "%L"
  
 # Custom additions: for chat (kragen)
 <Multi_key> <parenleft> <colon> : "☻" U263B # BLACK SMILING FACE
-<Multi_key> <colon> <parenright> : "😊"
+<Multi_key> <colon> <parenright> : "😃"
 <Multi_key> <o> <O> : "😳" 
-<Multi_key> <colon> <D> : "😄" U1F600
+<Multi_key> <colon> <D> : "😁" U1F600
 <Multi_key> <colon> <S> : "😖"
 <Multi_key> <asciicircum> <asciicircum> : "😊" U1F604
 <Multi_key> <X> <D> : "😆" U1F606
 <Multi_key> <colon> <p> : "😛" U1F61B
+<Multi_key> <semicolon> <p> : "😋" U1F60B
 <Multi_key> <semicolon> <parenright> : "😉" U1F609
-<Multi_key> <colon> <parenleft> : "☹" U2639 # WHITE FROWNING FACE
-<Multi_key> <colon> <asciitilde> : "⍨" U2368 # APL FUNCTIONAL SYMBOL TILDE DIAERESIS
+<Multi_key> <colon> <parenleft> : "😞" U2639 # WHITE FROWNING FACE
+<Multi_key> <colon> <asciitilde> : "😖" U2368 # APL FUNCTIONAL SYMBOL TILDE DIAERESIS
 <Multi_key> <colon> <bar> : "⸚" U2E1A # HYPHEN WITH DIAERESIS
 <Multi_key> <exclam> <question> : "‽" U203D # INTERROBANG
 <Multi_key> <question> <exclam> : "‽" U203D # INTERROBANG (in case you can’t remember the order)
