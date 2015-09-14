@@ -1,3 +1,19 @@
+# Load zgen
+source "${HOME}/.zsh/zgen/zgen.zsh"
+if ! zgen saved; then
+	zgen oh-my-zsh
+	zgen load zsh-users/zsh-syntax-highlighting
+	zgen load zsh-users/zsh-completions src
+	zgen load zsh-users/zsh-history-substring-search
+	zgen oh-my-zsh themes/gentoo
+	zgen save
+fi
+
+# bind UP and DOWN arrow keys to history search
+zmodload zsh/terminfo
+bindkey "$terminfo[kcuu1]" history-substring-search-up
+bindkey "$terminfo[kcud1]" history-substring-search-down
+
 # Extended globbing
 setopt extendedglob
 setopt null_glob
@@ -49,10 +65,10 @@ zstyle ':completion:*' menu select
 setopt correct
 
 # Gentoo prompt and window title with path names
-autoload -U promptinit
-promptinit
-prompt gentoo
-export PS1="${PS1:s/%1~/%50<...<%~/}"
+#autoload -U promptinit
+#promptinit
+#prompt gentoo
+#export PS1="${PS1:s/%1~/%50<...<%~/}"
 case ${TERM} in
 	xterm*|rxvt*|Eterm|aterm|kterm|gnome*|interix)
 		_settitle() {

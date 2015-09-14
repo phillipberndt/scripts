@@ -35,6 +35,15 @@ else
 	git clone ${CLONE_BASE}scripts.git _scripts
 fi
 
+# Initialize submodules
+cd _scripts
+git submodule init
+git submodule update --init
+cd ..
+
+# Install fonts and colors
+./_scripts/setup_gui_fontsandcolors.sh
+
 # Link binaries
 [ -d bin ] || mkdir bin
 cd bin
@@ -59,7 +68,7 @@ cd $HOME
 [ -d .zsh ] && mv .zsh zsh-old
 mkdir .zsh
 cd .zsh
-ln -s ../.local/_scripts/zshrc/{site,zshrc} .
+ln -s ../.local/_scripts/zshrc/{site,zshrc,zgen} .
 mkdir scripts
 cd ..
 ln -s .zsh/zshrc .zshrc
