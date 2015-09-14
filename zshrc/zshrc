@@ -5,6 +5,8 @@ if ! zgen saved; then
 	zgen load zsh-users/zsh-syntax-highlighting
 	zgen load zsh-users/zsh-completions src
 	zgen load zsh-users/zsh-history-substring-search
+	zgen load Tarrasch/zsh-autoenv # .autoenv.zsh USE autostash !!
+	zgen load rimraf/k # k
 	zgen oh-my-zsh themes/gentoo
 	zgen save
 fi
@@ -64,11 +66,7 @@ zstyle ':completion:*' menu select
 # Enable correction
 setopt correct
 
-# Gentoo prompt and window title with path names
-#autoload -U promptinit
-#promptinit
-#prompt gentoo
-#export PS1="${PS1:s/%1~/%50<...<%~/}"
+# Window title with path names
 case ${TERM} in
 	xterm*|rxvt*|Eterm|aterm|kterm|gnome*|interix)
 		_settitle() {
@@ -168,64 +166,6 @@ mncd() {
 	fi
 	cd $TARGET
 }
-
-# Hook: Local .zshrc's
-set -A _chpwd_local_zshrc_cache
-_chpwd_local_zshrc() {
-	[ -e ".zshrc.local" ] || return
-	
-	# Check if this file has already been sourced
-	local last_mod
-	last_mod=$(stat -c %Y ".zshrc.local")
-	local full_path
-	full_path="$(pwd)/.zshrc.local"
-	local at_index=-1
-	local index=-1
-	local unchanged=1
-	local shasum
-	for name mtime in $_chpwd_local_zshrc_cache; do
-		((index+=1))
-		if [ "$name" = "$full_path" ]; then
-			at_index=$index
-			if [[ $mtime < $last_mod ]]; then
-				unchanged=0
-			fi
-			break
-		fi
-	done
-	[[ "$unchanged" = "1" && "$at_index" != "-1" ]] && return
-	if [ "$at_index" = -1 ]; then
-		_chpwd_local_zshrc_cache=($_chpwd_local_zshrc_cache $full_path $last_mod)
-	else
-		_chpwd_local_zshrc_cache[(($at_index+2))]=$last_mod
-	fi
-
-	# Check if this file is well-known
-	shasum=$(sha1sum ".zshrc.local")
-
-	if ! grep -q $shasum ~/.zsh/local_zshrc_shasums &> /dev/null; then
-		while true; do
-			echo "This directory has an unverified local .zshrc."
-			echo -n "[e]xamine, [r]un or [i]gnore? "
-			read -s -k 1 action
-			echo -n "\033[2A\r\033[J"
-			if [ "$action" = "e" ]; then
-				$EDITOR ".zshrc.local"
-			elif [ "$action" = "r" ]; then
-				echo $shasum $full_path >> ~/.zsh/local_zshrc_shasums
-				# Source the file
-				source ".zshrc.local"
-				break
-			else
-				break
-			fi
-		done			
-	else
-		# Source the file
-		source ".zshrc.local"
-	fi
-}
-add-zsh-hook chpwd _chpwd_local_zshrc
 
 # Library directories for perl, etc.
 export PERL_LOCAL_LIB_ROOT="$HOME/.local";
