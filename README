@@ -147,3 +147,7 @@ Contents:
 * µredshift
 
  Tiny redshift alternative with only the most basic features.
+
+* owncloudfs
+
+ Mount public owncloud shares in userspace
