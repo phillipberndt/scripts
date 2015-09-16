@@ -23,6 +23,9 @@ setopt extendedglob
 setopt null_glob
 setopt nomatch
 
+# No history
+unset HISTFILE
+
 # Chdir stack enabled
 setopt auto_name_dirs
 setopt pushd_ignore_dups
