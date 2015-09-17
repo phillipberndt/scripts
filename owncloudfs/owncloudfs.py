@@ -92,8 +92,6 @@ class MultipartFormdataEncoder(object):
 class OwncloudProxy(object): # {{{
     """
         Proxy public OwnCloud shares
-
-        TODO Handle login timeouts (by simply re-running obtain_login_token)
     """
 
     class OwncloudProxyException(RuntimeError):
@@ -113,6 +111,8 @@ class OwncloudProxy(object): # {{{
         """
         self.url = url
         self.password = password
+        self._login_cookie = None
+        self._request_token = None
         self.obtain_login_token()
 
     @property
@@ -141,7 +141,7 @@ class OwncloudProxy(object): # {{{
             raise self.OwncloudProxyException("Password is wrong.")
         request_token = self.REQUEST_TOKEN_REGEX.search(response_text).group(1)
         if not request_token:
-            raise self.OwncloudProxyException("Login failed")
+            raise self.OwncloudProxyException("Login failed, or this is not a valid OwnCloud share URL")
         self._request_token = request_token
 
     def new_request(self, url):
@@ -152,8 +152,16 @@ class OwncloudProxy(object): # {{{
 
     def list_directory(self, path):
         "Returns a generator yielding (name, stat() dictionary) tuples"
-        request = self.new_request("%s%s?%s" % (self._url_base, self.LIST_SERVICE_PATH, urllib.urlencode({ "t": self._share_token, "dir": path, "sort": "name", "sortdirection": "asc" })))
-        response = json.load(urllib2.urlopen(request))
+        try:
+            request = self.new_request("%s%s?%s" % (self._url_base, self.LIST_SERVICE_PATH, urllib.urlencode({ "t": self._share_token, "dir": path, "sort": "name", "sortdirection": "asc" })))
+            response = json.load(urllib2.urlopen(request))
+        except urllib2.URLError as e:
+            if e.code != 404:
+                raise
+            # Login token expired, retry
+            self.obtain_login_token()
+            request = self.new_request("%s%s?%s" % (self._url_base, self.LIST_SERVICE_PATH, urllib.urlencode({ "t": self._share_token, "dir": path, "sort": "name", "sortdirection": "asc" })))
+            response = json.load(urllib2.urlopen(request))
         for entry in response[u"data"][u"files"]:
              mtime = time.mktime(datetime.datetime.strptime(entry[u"date"], "%B %d, %Y %H:%M").timetuple())
              name = entry[u"name"]
@@ -175,7 +183,13 @@ class OwncloudProxy(object): # {{{
         """
         directory, filename = os.path.split(path)
         request = self.new_request("%s%s?%s&download" % (self._url_base, self.PUBLIC_SERVICE_PATH, urllib.urlencode({ "service": "files", "t": self._share_token, "path": directory, "files": filename })))
-        return urllib2.urlopen(request)
+        response = urllib2.urlopen(request)
+        if response.info().getheader("Set-Cookie") is not None:
+            # Login token expired
+            self.obtain_login_token()
+            request = self.new_request("%s%s?%s&download" % (self._url_base, self.PUBLIC_SERVICE_PATH, urllib.urlencode({ "service": "files", "t": self._share_token, "path": directory, "files": filename })))
+            response = urllib2.urlopen(request)
+        return response
 
     def put_file(self, path, file_obj):
         "Upload the contents of a given opened file to the cloud"
@@ -305,8 +319,18 @@ if __name__ == '__main__':
     mountpoint = sys.argv[2]
     password = sys.argv[3] if len(sys.argv) == 4 else ""
 
+    mountpoint_managed = not os.path.isdir(mountpoint)
+    if mountpoint_managed:
+        os.mkdir(mountpoint)
+
     print "Logging you in.."
     proxy = OwncloudProxy(url, password)
 
     print "Starting up FUSE.."
-    fuse_instance = fuse.FUSE(OwncloudOperations(proxy), mountpoint, foreground=True)
+    try:
+        fuse_instance = fuse.FUSE(OwncloudOperations(proxy), mountpoint, foreground=True)
+    except KeyboardInterrupt:
+        pass
+
+    if mountpoint_managed:
+        os.rmdir(mountpoint)
