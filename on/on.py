@@ -115,7 +115,7 @@ if has_inotify:
             self.globmatch = None
             if "*" in parameter:
                 self.globmatch = parameter
-                path = os.path.dirname(parameter.split("*", 1)[0])
+                path = os.path.dirname(parameter.split("*", 1)[0]) or "."
                 self.add_path(path)
                 status(0, "inotify", "Watching for %s in folder %s" % (parameter, path))
             else:
