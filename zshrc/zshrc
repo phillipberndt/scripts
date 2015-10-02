@@ -1,4 +1,5 @@
 # Load zgen
+DISABLE_AUTO_UPDATE="true"
 source "${HOME}/.zsh/zgen/zgen.zsh"
 if ! zgen saved; then
 	zgen oh-my-zsh
