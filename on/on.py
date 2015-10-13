@@ -77,11 +77,11 @@ class OnPIDExit(OnEvent):
                 for pid, proc in processes.items():
                     print "       %05s %s" % (pid, proc)
                 while True:
-                    which = readline_timout("Which process do you want?", "all", 20, "^[0-9]+$")
-                    if which == "all" or which in processes:
+                    which = readline_timout("Which process do you want?", "all", 20, "^[0-9 ]+$")
+                    if which == "all" or all(int(x) in processes for x in which.strip().split()):
                         break
                 if which != "all":
-                    pid_list = [ int(which) ]
+                    pid_list = [ int(x) for x in which.split() ]
                 else:
                     pid_list = map(int, processes.keys())
             else:
@@ -413,7 +413,8 @@ def readline_timout(query, default, timeout=0, expect=None):
     _old = signal.signal(signal.SIGALRM, _raise)
     try:
         while True:
-            signal.alarm(timeout)
+            if timeout:
+                signal.alarm(timeout)
             data = raw_input("\007\033[1m%s\033[0m [%s, %ds timeout]: " % (query, default, timeout)).strip()
             if not data:
                 return default
