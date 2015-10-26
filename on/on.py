@@ -578,7 +578,7 @@ def main():
         if args and args[0] == "--":
             args.pop(0)
 
-        action = args[1:]
+        action = args
         assert events
     except:
         print_help()
@@ -602,11 +602,6 @@ def main():
         if not condition_met:
             continue
 
-        global_condition.acquire()
-        for x in event_objects:
-            x.reset()
-        global_condition.release()
-
         if "-k" in opts and proc:
             if proc.poll() is None:
                 status(1, "on", "Killing old action instance %d" % proc.pid)
@@ -628,6 +623,12 @@ def main():
                     proc.communicate()
         if "-r" not in opts:
             break
+
+        global_condition.acquire()
+        for x in event_objects:
+            x.reset()
+        global_condition.release()
+
 
 if __name__ == '__main__':
     try:
