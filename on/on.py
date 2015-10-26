@@ -15,15 +15,12 @@ import time
 
 global_output_lock = threading.RLock()
 
-class OnEvent(object):
+class EventBase(object):
     DESCRIPTION = "sample description"
     PREFIX = "sample"
     PARAMETER_DESCRIPTION = None
 
-    def __init__(self, parameter, global_condition=None):
-        if self.PARAMETER_DESCRIPTION is None and parameter is not None:
-            raise ValueError("%s does not expect an argument" % self.__class__.__name__)
-        self.parameter = parameter
+    def __init__(self, global_condition=None):
         self.event = threading.Event()
         self.reset_event = threading.Event()
         self.global_condition = global_condition
@@ -61,16 +58,34 @@ class OnEvent(object):
     def wait_for_event(self):
         raise NotImplementedError()
 
-class Modifier(object):
+class OnEvent(EventBase):
+    def __init__(self, parameter, global_condition=None):
+        if self.PARAMETER_DESCRIPTION is None and parameter is not None:
+            raise ValueError("%s does not expect an argument" % self.__class__.__name__)
+        self.parameter = parameter
+        super(OnEvent, self).__init__(global_condition=global_condition)
+
+class Modifier(EventBase):
     DESCRIPTION = "sample modifier"
     PREFIX = "~"
 
-    def __init__(self, event_handler, parameter):
+    def __init__(self, event_handler, parameter, global_condition=None):
         self.event_handler = event_handler
         self.parameter = parameter
+        self.real_global_condition = global_condition
+        self.condition = threading.Condition()
+        super(OnEvent, self).__init__(global_condition=self.condition)
 
     def wait_for_event(self):
-        raise NotImplementedError()
+        self.condition.acquire()
+        while not self.event_handler.is_event_set():
+            self.condition.wait()
+        self.condition.release()
+
+    def reset(self):
+        if self.event.is_set():
+            self.event_handler.reset_event.set()
+            self.reset_event.set()
 
 # Program exit {{{
 class OnPIDExit(OnEvent):
