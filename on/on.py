@@ -452,7 +452,7 @@ def status(level, component, line, is_update=False):
         else:
             col = "31"
         global_status_info_cache[component] = "[\033[1;%sm%s\033[0m] %s" % (col, component, line)
-        if is_update or True:
+        if is_update:
             up = "\033[1F\033[K"
         print "%s%s" % (up, ", ".join(global_status_info_cache.values()))
 
