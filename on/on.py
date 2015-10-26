@@ -13,15 +13,50 @@ import sys
 import threading
 import time
 
+global_output_lock = threading.RLock()
+
 class OnEvent(object):
     DESCRIPTION = "sample description"
     PREFIX = "sample"
     PARAMETER_DESCRIPTION = None
 
-    def __init__(self, parameter):
+    def __init__(self, parameter, global_condition=None):
         if self.PARAMETER_DESCRIPTION is None and parameter is not None:
             raise ValueError("%s does not expect an argument" % self.__class__.__name__)
         self.parameter = parameter
+        self.event = threading.Event()
+        self.reset_event = threading.Event()
+        self.global_condition = global_condition
+        self.setup()
+        self.initialize()
+        self.thread = threading.Thread(target=self.loop)
+        self.thread.daemon = True
+        self.thread.start()
+
+    def setup(self):
+        pass
+
+    def initialize(self):
+        pass
+
+    def loop(self):
+        while True:
+            self.initialize()
+            self.wait_for_event()
+            self.event.set()
+            if self.global_condition:
+                with self.global_condition:
+                    self.global_condition.notify()
+            self.reset_event.wait()
+            self.event.clear()
+            self.reset_event.clear()
+
+    def is_event_set(self):
+        return self.event.is_set()
+
+    def reset(self):
+        if self.event.is_set():
+            self.reset_event.set()
 
     def wait_for_event(self):
         raise NotImplementedError()
@@ -61,7 +96,8 @@ class OnPIDExit(OnEvent):
                 if parameter in cmdline:
                     yield int(pid), cmdline
 
-    def __init__(self, parameter):
+    def setup(self):
+        parameter = self.parameter
         try:
             pid_list = [ int(parameter) ]
             if not OnPIDExit.is_alive(pid_list[0]):
@@ -72,28 +108,29 @@ class OnPIDExit(OnEvent):
                 del processes[str(os.getpid())]
             if not processes:
                 raise ValueError("No process matches `%s'" % parameter)
-            if len(processes) > 1:
-                status(1, "exit", "Multiple choices: ")
-                for pid, proc in processes.items():
-                    print "       %05s %s" % (pid, proc)
-                while True:
-                    which = readline_timout("Which process do you want?", "all", 20, "^[0-9 ]+$")
-                    if which == "all" or all(int(x) in processes for x in which.strip().split()):
-                        break
-                if which != "all":
-                    pid_list = [ int(x) for x in which.split() ]
+            with global_output_lock:
+                if len(processes) > 1:
+                    status(1, self.PREFIX, "Multiple choices: ")
+                    for pid, proc in processes.items():
+                        print "       %05s %s" % (pid, proc)
+                    while True:
+                        which = readline_timout("Which process do you want?", "all", 20, "^[0-9 ]+$")
+                        if which == "all" or all(int(x) in processes for x in which.strip().split()):
+                            break
+                    if which != "all":
+                        pid_list = [ int(x) for x in which.split() ]
+                    else:
+                        pid_list = map(int, processes.keys())
                 else:
-                    pid_list = map(int, processes.keys())
-            else:
-                pid_list = [ int(processes.keys()[0]) ]
-            status(0, "exit", "Waiting for any of %d processes to exit" % len(pid_list))
+                    pid_list = [ int(processes.keys()[0]) ]
+            status(0, self.PREFIX, "Waiting for any of %d processes to exit" % len(pid_list))
         self.pid_list = pid_list
 
     def wait_for_event(self):
         while True:
             for pid in self.pid_list:
                 if not OnPIDExit.is_alive(pid):
-                    status(0, "exit", "PID %d exited" % pid, True)
+                    status(0, self.PREFIX, "PID %d exited" % pid, True)
                     return
             time.sleep(1)
 # }}}
@@ -110,17 +147,18 @@ if has_inotify:
         PREFIX = "inotify"
         PARAMETER_DESCRIPTION = "file"
 
-        def __init__(self, parameter):
+        def setup(self):
+            parameter = self.parameter
             self.ino = inotify.adapters.Inotify()
             self.globmatch = None
             if "*" in parameter:
                 self.globmatch = parameter
                 path = os.path.dirname(parameter.split("*", 1)[0]) or "."
                 self.add_path(path)
-                status(0, "inotify", "Watching for %s in folder %s" % (parameter, path))
+                status(0, self.PREFIX, "Watching for %s in folder %s" % (parameter, path))
             else:
                 self.add_path(parameter)
-                status(0, "inotify", "Watching for %s" % parameter)
+                status(0, self.PREFIX, "Watching for %s" % parameter)
 
         def add_path(self, path):
             self.ino.add_watch(path, inotify.constants.IN_CLOSE_WRITE | inotify.constants.IN_CREATE)
@@ -136,7 +174,7 @@ if has_inotify:
                     header, type_names, fdir, filename = event
                     path = os.path.join(fdir, filename)
                     if self.globmatch is None or fnmatch.fnmatch(path, self.globmatch):
-                        status(0, "inotify", "%s updated" % path, True)
+                        status(0, self.PREFIX, "%s updated" % path, True)
                         break
             return path
 # }}}
@@ -158,18 +196,20 @@ class NetworkThroughput(OnEvent):
         self.nbytes = nbytes
         return throughput
 
-    def __init__(self, parameter):
-        self.threshold = float(parameter) * 1024
+    def setup(self):
+        self.threshold = float(self.parameter) * 1024
+
+    def initialize(self):
         self.nbytes = NetworkThroughput.get_bytes()
         self.time = time.time()
         time.sleep(1)
-        status(0, "network", "Startup throughput is %2.2f kiB/s" % (self.get_throughput() / 1024, ))
+        status(0, self.PREFIX, "Startup throughput is %2.2f kiB/s" % (self.get_throughput() / 1024, ))
 
     def wait_for_event(self):
         while True:
             time.sleep(10)
             throughput = self.get_throughput()
-            status(0, "network", "Throughput is %2.2f kiB/s" % (throughput / 1024, ), True)
+            status(0, self.PREFIX, "Throughput is %2.2f kiB/s" % (throughput / 1024, ), True)
             if throughput < self.threshold:
                 break
 # }}}
@@ -179,21 +219,21 @@ class Pingable(OnEvent):
     PREFIX = "ping"
     PARAMETER_DESCRIPTION = "remote host"
 
-    def __init__(self, parameter):
-        self.parameter = parameter or "8.8.8.8"
+    def setup(self):
+        self.parameter = self.parameter or "8.8.8.8"
 
     def wait_for_event(self):
-        status(0, "ping", "Trying to ping %s" % self.parameter)
+        status(0, self.PREFIX, "Trying to ping %s" % self.parameter)
         with open("/dev/null", "w") as null:
             spinner = "|/-\\"
             n = 0
             while True:
                 if subprocess.call(["ping", "-c", "1", "-W", "5", self.parameter], stdout=null, stderr=null) == 0:
-                    status(0, "ping", "Received ping reply from %s" % self.parameter, True)
+                    status(0, self.PREFIX, "Received ping reply from %s" % self.parameter, True)
                     break
                 else:
                     n += 1
-                    status(0, "ping", "Didn't receive a ping reply from %s [%c]" % (self.parameter, spinner[n%len(spinner)]), True)
+                    status(0, self.PREFIX, "Didn't receive a ping reply from %s [%c]" % (self.parameter, spinner[n%len(spinner)]), True)
 # }}}
 # Socket connection {{{
 class SocketConnection(OnEvent):
@@ -220,7 +260,8 @@ class SocketConnection(OnEvent):
                     ip = socket.inet_ntop(socket.AF_INET6, struct.pack("@IIII", int(host[:4], 16), int(host[4:8], 16), int(host[8:12], 16), int(host[12:], 16)))
                     yield ip, port
 
-    def __init__(self, parameter):
+    def setup(self):
+        parameter = self.parameter
         via = ""
         if re.match("^[0-9\.:]+$", parameter):
             self.ip = parameter
@@ -243,7 +284,7 @@ class SocketConnection(OnEvent):
                         break
                 else:
                     raise ValueError("No open connection to %s found" % parameter)
-        status(0, "tcp", "Waiting for connection(s) to %s to be closed%s" % (self.ip, (" (found %s)" % via) if via else ""))
+        status(0, self.PREFIX, "Waiting for connection(s) to %s to be closed%s" % (self.ip, (" (found %s)" % via) if via else ""))
 
     def wait_for_event(self):
         while self.ip in (x[0] for x in SocketConnection.get_connections()):
@@ -270,11 +311,13 @@ class CPUUsage(OnEvent):
         self.stat = stat
         return usage
 
-    def __init__(self, parameter):
-        self.threshold = float(parameter)
+    def setup(self):
+        self.threshold = float(self.parameter)
+
+    def initialize(self):
         self.stat = CPUUsage.get_stat()
         time.sleep(1)
-        status(0, "cpu", "Startup CPU usage is %2.2f%%" % (self.get_usage(),))
+        status(0, self.PREFIX, "Startup CPU usage is %2.2f%%" % (self.get_usage(),))
 
     def wait_for_event(self):
         while True:
@@ -283,7 +326,7 @@ class CPUUsage(OnEvent):
                 usage = self.get_usage()
             except ZeroDivisionError:
                 continue
-            status(0, "cpu", "CPU usage is %2.2f%%" % (usage,), True)
+            status(0, self.PREFIX, "CPU usage is %2.2f%%" % (usage,), True)
             if usage < self.threshold:
                 break
 # }}}
@@ -298,19 +341,20 @@ if has_opencv:
         DESCRIPTION = "Detect movement on the webcam"
         PREFIX = "movement"
 
-        def __init__(self, parameter):
-            with SupressOutput() as _:
+        def setup(self):
+            with SupressOutput():
                 self.cam = cv2.VideoCapture(0)
-            status(0, "movement", "Waiting for movement")
+            status(0, self.PREFIX, "Waiting for movement")
 
         def grab_frame(self):
             frame = self.cam.read()[1]
             while frame is None:
-                with SupressOutput() as _:
+                with SupressOutput():
                     self.cam = cv2.VideoCapture(0)
                 frame = self.cam.read()[1]
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
             return frame
+
         def wait_for_event(self):
             while True:
                 for i in range(10):
@@ -321,7 +365,7 @@ if has_opencv:
                     diff = cv2.absdiff(cv2.GaussianBlur(frame, (21, 21), 0), cv2.GaussianBlur(new_frame, (21, 21), 0))
                     frame = new_frame
                     (minVal, maxVal, minLoc, maxLoc) = cv2.minMaxLoc(diff)
-                    status(0, "movement", "Movement level is %2d" % maxVal, True)
+                    status(0, self.PREFIX, "Movement level is %2d" % maxVal, True)
                 return True
 # }}}
 # Whistling {{{
@@ -340,12 +384,14 @@ if has_alsa and has_numpy:
         DESCRIPTION = "Detect whistling on the primary microphone"
         PREFIX = "whistle"
 
-        def __init__(self, parameter):
+        def setup(self):
             self.pcm = alsaaudio.PCM(alsaaudio.PCM_CAPTURE)
             self.pcm.setformat(alsaaudio.PCM_FORMAT_FLOAT_LE)
             self.pcm.setrate(16000)
             self.pcm.setchannels(1)
-            status(0, "whistle", "Waiting for a whistle")
+
+        def initialize(self):
+            status(0, self.PREFIX, "Waiting for a whistle")
 
         def get_center_freq(self):
             data = []
@@ -365,26 +411,27 @@ if has_alsa and has_numpy:
                 f, A = self.get_center_freq()
                 if A > -7:
                     if f < 1e3:
-                        status(0, "whistle", "Center frequency %04.2f Hz is uninteresting" % f, True)
+                        status(0, self.PREFIX, "Center frequency %04.2f Hz is uninteresting" % f, True)
                     else:
                         time.sleep(.1)
                         f2, A2 = self.get_center_freq()
                         if abs(f - f2) > .5e3:
-                            status(1, "whistle", "No whistle, %04.2f Hz fits but too short" % f, True)
+                            status(1, self.PREFIX, "No whistle, %04.2f Hz fits but too short" % f, True)
                         else:
-                            status(0, "whistle", "Got a whistle at %04.2f Hz with amplitude %03.2f" % (f, A), True)
+                            status(0, self.PREFIX, "Got a whistle at %04.2f Hz with amplitude %03.2f" % (f, A), True)
                             return True
 # }}}
 
 def print_help():
     print "Execute a program once a certain event occurs"
-    print "Syntax: on [-krw] [modifier(s)]<type>[:<arguments>] <action>"
+    print "Syntax: on [-krw] [modifier(s)]<type>[:<arguments>] [modifier(s)]<type>[:<arguments>] .. [--] <action>"
     print
     print "Options:"
     print "  -k   Kill old action if it is retriggered too fast"
     print "  -r   Repeat action"
     print "  -w   Wait for action to complete before running it again"
     print "  -o   Neatly format the action's output"
+    print "  -a   If multiple events are given, AND them instead of ORing"
     print
     print "Event types:"
     for cls in sorted(OnEvent.__subclasses__(), key=lambda x: x.PREFIX):
@@ -395,38 +442,43 @@ def print_help():
         for cls in sorted(Modifier.__subclasses__(), key=lambda x: x.PREFIX):
             print "  %-25s %s" % (cls.PREFIX, cls.DESCRIPTION)
 
+global_status_info_cache = {}
 def status(level, component, line, is_update=False):
-    if level == 0:
-        col = "32"
-    elif level == 1:
-        col = "33"
-    else:
-        col = "31"
-    up = "" if not is_update else "\033[1F\033[K"
-    print "%s[\033[1;%sm%s\033[0m] %s" % (up, col, component, line)
+    with global_output_lock:
+        if level == 0:
+            col = "32"
+        elif level == 1:
+            col = "33"
+        else:
+            col = "31"
+        global_status_info_cache[component] = "[\033[1;%sm%s\033[0m] %s" % (col, component, line)
+        if is_update or True:
+            up = "\033[1F\033[K"
+        print "%s%s" % (up, ", ".join(global_status_info_cache.values()))
 
 def readline_timout(query, default, timeout=0, expect=None):
-    class _TimeoutError(Exception):
-        pass
-    def _raise(*args):
-        raise _TimeoutError()
-    _old = signal.signal(signal.SIGALRM, _raise)
-    try:
-        while True:
-            if timeout:
-                signal.alarm(timeout)
-            data = raw_input("\007\033[1m%s\033[0m [%s, %ds timeout]: " % (query, default, timeout)).strip()
-            if not data:
-                return default
-            if not expect or re.match(expect, data):
-                return data
-            print "\033[1F\033[K",
-    except _TimeoutError:
-        print
-        return default
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, _old)
+    with global_output_lock:
+        class _TimeoutError(Exception):
+            pass
+        def _raise(*args):
+            raise _TimeoutError()
+        _old = signal.signal(signal.SIGALRM, _raise)
+        try:
+            while True:
+                if timeout:
+                    signal.alarm(timeout)
+                data = raw_input("\007\033[1m%s\033[0m [%s, %ds timeout]: " % (query, default, timeout)).strip()
+                if not data:
+                    return default
+                if not expect or re.match(expect, data):
+                    return data
+                print "\033[1F\033[K",
+        except _TimeoutError:
+            print
+            return default
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, _old)
 
 def is_executable(file_name):
     for path in os.environ["PATH"].split(":"):
@@ -436,6 +488,7 @@ def is_executable(file_name):
 
 class SupressOutput(object):
     def __enter__(self):
+        global_output_lock.acquire()
         self.stdout_fd = sys.stdout.fileno()
         self.stderr_fd = sys.stderr.fileno()
         self.stdout_dup = os.dup(self.stdout_fd)
@@ -449,6 +502,7 @@ class SupressOutput(object):
         os.dup2(self.stderr_dup, self.stderr_fd)
         os.close(self.stdout_dup)
         os.close(self.stderr_dup)
+        global_output_lock.release()
 
 def format_output_thread(proc):
     class Quit(Exception):
@@ -485,47 +539,74 @@ def format_output_thread(proc):
             status(1, "on", "Program exited with code %d" % (proc.returncode,))
 
 def main():
+    events = []
+
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "krwo")
+        opts, args = getopt.getopt(sys.argv[1:], "krwoa")
         opts = dict(opts)
-        event = args[0]
-        parameter = None
-        if ":" in event:
-            event, parameter = event.split(":", 1)
+
+        while args and args[0] != "--":
+            event = args[0]
+            parameter = None
+            if ":" in event:
+                event, parameter = event.split(":", 1)
+
+            modifiers = []
+            if len(Modifier.__subclasses__()) > 0:
+                while True:
+                    for cls in sorted(Modifier.__subclasses__(), key=lambda x: x.PREFIX):
+                        if event.startswith(cls.PREFIX):
+                            modifiers.append(cls)
+                            event = event[1:]
+                            break
+                    else:
+                        continue
+                    break
+
+            handler = None
+            for cls in OnEvent.__subclasses__():
+                if cls.PREFIX == event:
+                    handler = cls
+                    break
+
+            if handler:
+                events.append((handler, parameter, modifiers))
+                args.pop(0)
+            else:
+                break
+
+        if args and args[0] == "--":
+            args.pop(0)
+
         action = args[1:]
+        assert events
     except:
         print_help()
         sys.exit(1)
 
-    modifiers = []
-    if len(Modifier.__subclasses__()) > 0:
-        while True:
-            for cls in sorted(Modifier.__subclasses__(), key=lambda x: x.PREFIX):
-                if event.startswith(cls.PREFIX):
-                    modifiers.append(cls)
-                    event = event[1:]
-                    break
-            else:
-                continue
-            break
-
-    for cls in OnEvent.__subclasses__():
-        if cls.PREFIX == event:
-            handler = cls
-            break
-    else:
-        print_help()
-        print
-        print "Unknown event type."
-        sys.exit(1)
+    global_condition = threading.Condition(threading.RLock())
+    event_objects = []
+    for handler, parameter, modifiers in events:
+        instance = handler(parameter, global_condition=global_condition)
+        for modifier in modifiers:
+            instance = modifier(instance, parameter)
+        event_objects.append(instance)
 
     ptarget = subprocess.PIPE if "-o" in opts else None
     proc = None
     while True:
-        instance = handler(parameter)
-        for modifier in modifiers:
-            instance = modifier(instance, parameter)
-        instance.wait_for_event()
+        global_condition.acquire()
+        global_condition.wait(99999) # timeout required for C-c to work in Py 2.x, see python issue 8844
+        condition_met = (all if "-a" in opts else any)(( x.is_event_set() for x in event_objects ))
+        global_condition.release()
+        if not condition_met:
+            continue
+
+        global_condition.acquire()
+        for x in event_objects:
+            x.reset()
+        global_condition.release()
+
         if "-k" in opts and proc:
             if proc.poll() is None:
                 status(1, "on", "Killing old action instance %d" % proc.pid)
