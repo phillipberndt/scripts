@@ -25,7 +25,7 @@ screens = [ [ int(x) for x in y ] for y in re.findall(" connected.* ([0-9]+)x([0
 images = random.sample([ x for x in os.listdir(imgdir) if x.lower()[-3:] in ("jpg", "png") ], len(screens))
 
 max_height = max(( x[1] for x in screens ))
-total_width  = sum(( x[0] for x in screens ))
+total_width = max(( x[0] + x[2] for x in screens ))
 
 output = PIL.Image.new("RGB", (total_width, max_height))
 draw = PIL.ImageDraw.Draw(output)
@@ -55,10 +55,11 @@ for no in range(len(screens)):
 
         if CAN_DO_GRADIENTS:
             np_img = np.array(image)
-            top_left_avg = np.apply_over_axes(np.mean, np_img[:50, :50], [0, 1]).reshape(3)
-            top_right_avg = np.apply_over_axes(np.mean, np_img[-50:, :50], [0, 1]).reshape(3)
-            btm_left_avg = np.apply_over_axes(np.mean, np_img[:50, -50:], [0, 1]).reshape(3)
-            btm_right_avg = np.apply_over_axes(np.mean, np_img[-50:, -50:], [0, 1]).reshape(3)
+            sample_size = .25 * min(np_img.shape[:2])
+            top_left_avg = np.apply_over_axes(np.mean, np_img[:sample_size, :sample_size], [0, 1]).reshape(3)
+            top_right_avg = np.apply_over_axes(np.mean, np_img[-sample_size:, :sample_size], [0, 1]).reshape(3)
+            btm_left_avg = np.apply_over_axes(np.mean, np_img[:sample_size, -sample_size:], [0, 1]).reshape(3)
+            btm_right_avg = np.apply_over_axes(np.mean, np_img[-sample_size:, -sample_size:], [0, 1]).reshape(3)
             interps = [ scipy.interpolate.interp2d([0, screen[0], 0, screen[0]], [0, 0, screen[1], screen[1]], [ top_left_avg[col], btm_left_avg[col], top_right_avg[col], btm_right_avg[col]]) for col in range(3) ]
             xx = np.arange(screen[0])
             yy = np.arange(screen[1])
