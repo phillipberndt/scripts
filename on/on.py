@@ -554,6 +554,23 @@ def format_output_thread(proc):
         else:
             status(1, "on", "Program exited with code %d" % (proc.returncode,))
 
+def init_sudo(sudo_executable):
+    status(0, "on", "Authenticating for sudo")
+    subprocess.call([sudo_executable, "-v"])
+    def _sudo_thread():
+        while True:
+            time.sleep(60 * 4)
+            subprocess.call([sudo_executable, "-nv"])
+    sudo_thread = threading.Thread(target=_sudo_thread)
+    sudo_thread.daemon = True
+    sudo_thread.start()
+
+_setsid_popen_tty = os.ttyname(0)
+
+def preexec_fn():
+    os.setpgid(0, 0)
+    # Do not use setsid because that kills sudo's sudoers cache support!
+
 def main():
     events = []
 
@@ -600,6 +617,9 @@ def main():
         print_help()
         sys.exit(1)
 
+    if "sudo" in action[0]:
+        init_sudo(action[0])
+
     global_condition = threading.Condition(threading.RLock())
     event_objects = []
     for handler, parameter, modifiers in events:
@@ -626,9 +646,9 @@ def main():
                 proc.wait()
         if action:
             if is_executable(action[0]):
-                proc = subprocess.Popen(action, stdout=ptarget, stderr=ptarget, preexec_fn=os.setsid)
+                proc = subprocess.Popen(action, stdout=ptarget, stderr=ptarget, preexec_fn=preexec_fn)
             else:
-                proc = subprocess.Popen(action, shell=True, stdout=ptarget, stderr=ptarget, preexec_fn=os.setsid)
+                proc = subprocess.Popen(action, shell=True, stdout=ptarget, stderr=ptarget, preexec_fn=preexec_fn)
             if ptarget:
                 proc_thread = threading.Thread(target=format_output_thread, args=(proc, ))
                 proc_thread.start()
