@@ -617,7 +617,7 @@ def main():
         print_help()
         sys.exit(1)
 
-    if "sudo" in action[0]:
+    if action and "sudo" in action[0]:
         init_sudo(action[0])
 
     global_condition = threading.Condition(threading.RLock())
