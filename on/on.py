@@ -466,11 +466,11 @@ def status(level, component, line, is_update=False):
             col = "33"
         else:
             col = "31"
-        global_status_info_cache[component] = "[\033[1;%sm%s\033[0m] %s" % (col, component, line)
+        global_status_info_cache[component] = { "update": time.time(), "text": "[\033[1;%sm%s\033[0m] %s" % (col, component, line) }
         up = ""
         if is_update:
             up = "\033[1F\033[K"
-        print "%s%s" % (up, ", ".join(global_status_info_cache.values()))
+        print "%s%s" % (up, ", ".join(x["text"] for x in global_status_info_cache.values() if x["update"] > time.time() - 5))
 
 def readline_timout(query, default, timeout=0, expect=None):
     with global_output_lock:
