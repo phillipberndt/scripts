@@ -321,8 +321,11 @@ class Timer(OnEvent):
 
     def wait_for_event(self):
         wait_until = datetime.datetime.now() + datetime.timedelta(seconds=self.time_seconds)
-        status(0, "timer", "Waiting until %s (%d seconds)" % (wait_until.isoformat(), self.time_seconds))
-        time.sleep(self.time_seconds)
+        status(0, self.PREFIX, "Waiting until %s" % (wait_until.isoformat(),))
+        while True:
+            time_to_wait = (wait_until - datetime.datetime.now()).total_seconds() + 1
+            status(0, self.PREFIX, "Waiting until %s (%d seconds)" % (wait_until.isoformat(), time_to_wait), True)
+            time.sleep(time_to_wait if time_to_wait < 5 else 5)
 # }}}
 # CPU usage {{{
 class CPUUsage(OnEvent):
@@ -475,7 +478,8 @@ def print_help():
         for cls in sorted(Modifier.__subclasses__(), key=lambda x: x.PREFIX):
             print "  %-25s %s" % (cls.PREFIX, cls.DESCRIPTION)
 
-global_status_info_cache = {}
+global_status_info_cache = []
+last_index = [ 0 ]
 def status(level, component, line, is_update=False):
     with global_output_lock:
         if level == 0:
@@ -484,11 +488,23 @@ def status(level, component, line, is_update=False):
             col = "33"
         else:
             col = "31"
-        global_status_info_cache[component] = { "update": time.time(), "text": "[\033[1;%sm%s\033[0m] %s" % (col, component, line) }
-        up = ""
-        if is_update:
-            up = "\033[1F\033[K"
-        print "%s%s" % (up, ", ".join(x["text"] for x in global_status_info_cache.values() if x["update"] > time.time() - 5))
+
+        try:
+            index = global_status_info_cache.index(component)
+            if not is_update:
+                while global_status_info_cache:
+                    global_status_info_cache.pop()
+                global_status_info_cache.append(component)
+                index = 0
+                last_index[0] = 0
+        except ValueError:
+            global_status_info_cache.append(component)
+            index = len(global_status_info_cache) - 1
+
+        movement = index - last_index[0]
+        last_index[0] = index + 1
+
+        print "%s\033[K[\033[1;%sm%s\033[0m] %s" % (("\033[%dA" % -movement) if movement < 0 else ("\033[%dB" % movement) if movement > 0 else "", col, component, line)
 
 def readline_timout(query, default, timeout=0, expect=None):
     with global_output_lock:
