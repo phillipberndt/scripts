@@ -60,33 +60,16 @@ class EventBase(object):
         raise NotImplementedError()
 
 class OnEvent(EventBase):
-    def __init__(self, parameter, global_condition=None):
+    SUPPORTS_NEGATE = False
+
+    def __init__(self, parameter, negate_condition=False, global_condition=None):
         if self.PARAMETER_DESCRIPTION is None and parameter is not None:
             raise ValueError("%s does not expect an argument" % self.__class__.__name__)
+        self.negate_condition = negate_condition
+        if self.negate_condition and not self.SUPPORTS_NEGATE:
+            raise ValueError("%s does not support negation" % self.__class__.__name__)
         self.parameter = parameter
         super(OnEvent, self).__init__(global_condition=global_condition)
-
-class Modifier(EventBase):
-    DESCRIPTION = "sample modifier"
-    PREFIX = "~"
-
-    def __init__(self, event_handler, parameter, global_condition=None):
-        self.event_handler = event_handler
-        self.parameter = parameter
-        self.real_global_condition = global_condition
-        self.condition = threading.Condition()
-        super(OnEvent, self).__init__(global_condition=self.condition)
-
-    def wait_for_event(self):
-        self.condition.acquire()
-        while not self.event_handler.is_event_set():
-            self.condition.wait()
-        self.condition.release()
-
-    def reset(self):
-        if self.event.is_set():
-            self.event_handler.reset_event.set()
-            self.reset_event.set()
 
 # Program exit {{{
 class OnPIDExit(OnEvent):
@@ -199,6 +182,7 @@ class NetworkThroughput(OnEvent):
     DESCRIPTION = "Network throughput drops below a threshold"
     PREFIX = "nettput"
     PARAMETER_DESCRIPTION = "kiB/s"
+    SUPPORTS_NEGATE = True
 
     @staticmethod
     def get_bytes():
@@ -226,14 +210,19 @@ class NetworkThroughput(OnEvent):
             time.sleep(10)
             throughput = self.get_throughput()
             status(0, self.PREFIX, "Throughput is %2.2f kiB/s" % (throughput / 1024, ), True)
-            if throughput < self.threshold:
-                break
+            if self.negate_condition:
+                if throughput >= self.threshold:
+                    break
+            else:
+                if throughput < self.threshold:
+                    break
 # }}}
 # Ping {{{
 class Pingable(OnEvent):
     DESCRIPTION = "Host replies to ping"
     PREFIX = "ping"
     PARAMETER_DESCRIPTION = "remote host"
+    SUPPORTS_NEGATE = True
 
     def setup(self):
         self.parameter = self.parameter or "8.8.8.8"
@@ -244,18 +233,23 @@ class Pingable(OnEvent):
             spinner = "|/-\\"
             n = 0
             while True:
+                n += 1
                 if subprocess.call(["ping", "-c", "1", "-W", "5", self.parameter], stdout=null, stderr=null) == 0:
-                    status(0, self.PREFIX, "Received ping reply from %s" % self.parameter, True)
-                    break
+                    status(0, self.PREFIX, "Received ping reply from %s [%c]" % (self.parameter, spinner[n%len(spinner)]), True)
+                    if not self.negate_condition:
+                        break
+                    time.sleep(5)
                 else:
-                    n += 1
                     status(0, self.PREFIX, "Didn't receive a ping reply from %s [%c]" % (self.parameter, spinner[n%len(spinner)]), True)
+                    if self.negate_condition:
+                        break
 # }}}
 # Socket connection {{{
 class SocketConnection(OnEvent):
     DESCRIPTION = "Network connection to host is closed"
     PREFIX = "tcpconn"
     PARAMETER_DESCRIPTION = "remote host"
+    SUPPORTS_NEGATE = True
 
     @staticmethod
     def get_connections():
@@ -282,6 +276,8 @@ class SocketConnection(OnEvent):
         if re.match("^[0-9\.:]+$", parameter):
             self.ip = parameter
         else:
+            if self.negate_condition:
+                raise ValueError("%s can only be negated if the argument is an IP" % (self.PREFIX,))
             try:
                 ips = socket.gethostbyaddr(parameter)[2]
             except socket.gaierror:
@@ -303,8 +299,12 @@ class SocketConnection(OnEvent):
         status(0, self.PREFIX, "Waiting for connection(s) to %s to be closed%s" % (self.ip, (" (found %s)" % via) if via else ""))
 
     def wait_for_event(self):
-        while self.ip in (x[0] for x in SocketConnection.get_connections()):
-            time.sleep(1)
+        if self.negate_condition:
+            while self.ip not in (x[0] for x in SocketConnection.get_connections()):
+                time.sleep(1)
+        else:
+            while self.ip in (x[0] for x in SocketConnection.get_connections()):
+                time.sleep(1)
 
 # }}}
 # Timer {{{
@@ -332,6 +332,7 @@ class CPUUsage(OnEvent):
     DESCRIPTION = "CPU usage drops below a threshold"
     PREFIX = "cpu"
     PARAMETER_DESCRIPTION = "percent"
+    SUPPORTS_NEGATE = True
 
     @staticmethod
     def get_stat():
@@ -363,7 +364,7 @@ class CPUUsage(OnEvent):
             except ZeroDivisionError:
                 continue
             status(0, self.PREFIX, "CPU usage is %2.2f%%" % (usage,), True)
-            if usage < self.threshold:
+            if (usage < self.threshold) != self.negate_condition:
                 break
 # }}}
 # Movement {{{
@@ -376,6 +377,7 @@ if has_opencv:
     class Movement(OnEvent):
         DESCRIPTION = "Detect movement on the webcam"
         PREFIX = "movement"
+        SUPPORTS_NEGATE = True
 
         def setup(self):
             with SupressOutput():
@@ -396,12 +398,14 @@ if has_opencv:
                 for i in range(10):
                     frame = self.grab_frame()
                 maxVal = 0
-                while maxVal < 60:
+                while True:
                     new_frame = self.grab_frame()
                     diff = cv2.absdiff(cv2.GaussianBlur(frame, (21, 21), 0), cv2.GaussianBlur(new_frame, (21, 21), 0))
                     frame = new_frame
                     (minVal, maxVal, minLoc, maxLoc) = cv2.minMaxLoc(diff)
                     status(0, self.PREFIX, "Movement level is %2d" % maxVal, True)
+                    if (maxVal < 60) == self.negate_condition:
+                        break
                 return True
 # }}}
 # Whistling {{{
@@ -419,6 +423,7 @@ if has_alsa and has_numpy:
     class Whistle(OnEvent):
         DESCRIPTION = "Detect whistling on the primary microphone"
         PREFIX = "whistle"
+        SUPPORTS_NEGATE = True
 
         def setup(self):
             self.pcm = alsaaudio.PCM(alsaaudio.PCM_CAPTURE)
@@ -455,12 +460,17 @@ if has_alsa and has_numpy:
                             status(1, self.PREFIX, "No whistle, %04.2f Hz fits but too short" % f, True)
                         else:
                             status(0, self.PREFIX, "Got a whistle at %04.2f Hz with amplitude %03.2f" % (f, A), True)
-                            return True
+                            if not self.negate_condition:
+                                return True
+                            else:
+                                continue
+                if self.negate_condition:
+                    return True
 # }}}
 
 def print_help():
     print "Execute a program once a certain event occurs"
-    print "Syntax: on [-krw] [modifier(s)]<type>[:<arguments>] [modifier(s)]<type>[:<arguments>] .. [--] <action>"
+    print "Syntax: on [-krw] <type>[:<arguments>] <type>[:<arguments>] .. [--] <action>"
     print
     print "Options:"
     print "  -k   Kill old action if it is retriggered too fast"
@@ -471,12 +481,9 @@ def print_help():
     print
     print "Event types:"
     for cls in sorted(OnEvent.__subclasses__(), key=lambda x: x.PREFIX):
-        print "  %-25s %s" % ("%s:<%s>" % (cls.PREFIX, cls.PARAMETER_DESCRIPTION) if cls.PARAMETER_DESCRIPTION else cls.PREFIX, cls.DESCRIPTION)
+        print "  %3s%-25s %s" % ("[~]" if cls.SUPPORTS_NEGATE else "", "%s:<%s>" % (cls.PREFIX, cls.PARAMETER_DESCRIPTION) if cls.PARAMETER_DESCRIPTION else cls.PREFIX, cls.DESCRIPTION)
+    print "An ampersand negates an event's meaning."
     print
-    if Modifier.__subclasses__():
-        print "Modifiers:"
-        for cls in sorted(Modifier.__subclasses__(), key=lambda x: x.PREFIX):
-            print "  %-25s %s" % (cls.PREFIX, cls.DESCRIPTION)
 
 global_status_info_cache = []
 last_index = [ 0 ]
@@ -618,17 +625,11 @@ def main():
             if ":" in event:
                 event, parameter = event.split(":", 1)
 
-            modifiers = []
-            if len(Modifier.__subclasses__()) > 0:
-                while True:
-                    for cls in sorted(Modifier.__subclasses__(), key=lambda x: x.PREFIX):
-                        if event.startswith(cls.PREFIX):
-                            modifiers.append(cls)
-                            event = event[1:]
-                            break
-                    else:
-                        continue
-                    break
+            if event and event[0] == "~":
+                negate = True
+                event = event[1:]
+            else:
+                negate = False
 
             handler = None
             for cls in OnEvent.__subclasses__():
@@ -637,7 +638,7 @@ def main():
                     break
 
             if handler:
-                events.append((handler, parameter, modifiers))
+                events.append((handler, parameter, negate))
                 args.pop(0)
             else:
                 break
@@ -656,10 +657,8 @@ def main():
 
     global_condition = threading.Condition(threading.RLock())
     event_objects = []
-    for handler, parameter, modifiers in events:
-        instance = handler(parameter, global_condition=global_condition)
-        for modifier in modifiers:
-            instance = modifier(instance, parameter)
+    for handler, parameter, negate_condition in events:
+        instance = handler(parameter, negate_condition=negate_condition, global_condition=global_condition)
         event_objects.append(instance)
 
     ptarget = subprocess.PIPE if "-o" in opts else None
