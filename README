@@ -129,9 +129,9 @@ Contents:
 
 * on
 
-  Wait for some kind and event and then execute a command. Event types include
-  inotify events (file changes), network throughput measurements, or that a certain
-  process exits.
+  Wait for some kind and event and then execute a command. Event types
+  include inotify events (file changes), network throughput measurements,
+  or that a certain process exits.
 
 * pskill
 
@@ -141,13 +141,13 @@ Contents:
 
 * colors
 
- Small tool to output the different console codes for the various colors.
- I tend to forget them all the time.
+  Small tool to output the different console codes for the various colors.
+  I tend to forget them all the time.
 
 * µredshift
 
- Tiny redshift alternative with only the most basic features.
+  Tiny redshift alternative with only the most basic features.
 
 * owncloudfs
 
- Mount public owncloud shares in userspace
+  Mount public owncloud shares in userspace
