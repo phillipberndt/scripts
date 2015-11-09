@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # encoding: utf-8
+import datetime
 import fnmatch
 import getopt
 import os
@@ -305,6 +306,23 @@ class SocketConnection(OnEvent):
         while self.ip in (x[0] for x in SocketConnection.get_connections()):
             time.sleep(1)
 
+# }}}
+# Timer {{{
+class Timer(OnEvent):
+    DESCRIPTION = "Wait for a specific amount of time, like sleep"
+    PREFIX = "timer"
+    PARAMETER_DESCRIPTION = "time"
+
+    def setup(self):
+        self.time_seconds = 0
+        to_seconds = { "d": 3600*24, "h": 3600, "m": 60, "s": 1, "": 1 }
+        for amount, unit in re.findall("([0-9\.]+)([hms]?)", self.parameter):
+            self.time_seconds += float(amount) * to_seconds[unit]
+
+    def wait_for_event(self):
+        wait_until = datetime.datetime.now() + datetime.timedelta(seconds=self.time_seconds)
+        status(0, "timer", "Waiting until %s (%d seconds)" % (wait_until.isoformat(), self.time_seconds))
+        time.sleep(self.time_seconds)
 # }}}
 # CPU usage {{{
 class CPUUsage(OnEvent):
