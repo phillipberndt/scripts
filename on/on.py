@@ -470,7 +470,7 @@ if has_alsa and has_numpy:
 
 def print_help():
     print "Execute a program once a certain event occurs"
-    print "Syntax: on [-krw] <type>[:<arguments>] <type>[:<arguments>] .. [--] <action>"
+    print "Syntax: on [-krw] <type>[:<arguments>] <type>[:<arguments>] .. [--] [sudo] <action>"
     print
     print "Options:"
     print "  -k   Kill old action if it is retriggered too fast"
@@ -596,12 +596,14 @@ def format_output_thread(proc):
             status(1, "on", "Program exited with code %d" % (proc.returncode,))
 
 def init_sudo(sudo_executable):
-    status(0, "on", "Authenticating for sudo")
+    status(0, "sudo", "Pre-authenticating for command involving sudo")
     subprocess.call([sudo_executable, "-v"])
+    status(0, "sudo", "Authenticated for command involving sudo")
     def _sudo_thread():
         while True:
             time.sleep(60 * 4)
             subprocess.call([sudo_executable, "-nv"])
+            status(0, "sudo", "Renewed sudo authentication at %s" % (datetime.datetime.now().isoformat(),), True)
     sudo_thread = threading.Thread(target=_sudo_thread)
     sudo_thread.daemon = True
     sudo_thread.start()
