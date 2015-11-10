@@ -323,8 +323,10 @@ class Timer(OnEvent):
         wait_until = datetime.datetime.now() + datetime.timedelta(seconds=self.time_seconds)
         status(0, self.PREFIX, "Waiting until %s" % (wait_until.isoformat(),))
         while True:
-            time_to_wait = seconds_to_time((wait_until - datetime.datetime.now()).total_seconds() + 1)
-            status(0, self.PREFIX, "Waiting until %s (%s left)" % (wait_until.isoformat(), time_to_wait), True)
+            time_to_wait = (wait_until - datetime.datetime.now()).total_seconds() + 1
+            if time_to_wait < 0:
+                break
+            status(0, self.PREFIX, "Waiting until %s (%s left)" % (wait_until.isoformat(), seconds_to_time(time_to_wait)), True)
             time.sleep(time_to_wait if time_to_wait < 5 else 5)
 # }}}
 # CPU usage {{{
