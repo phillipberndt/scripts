@@ -367,6 +367,42 @@ class CPUUsage(OnEvent):
             if (usage < self.threshold) != self.negate_condition:
                 break
 # }}}
+# MEM usage {{{
+class MEMUsage(OnEvent):
+    DESCRIPTION = "Memory usage drops below a threshold"
+    PREFIX = "mem"
+    PARAMETER_DESCRIPTION = "percent"
+    SUPPORTS_NEGATE = True
+
+    @staticmethod
+    def get_meminfo():
+        data = {}
+        for line in open("/proc/meminfo").readlines():
+            key, value = line.split(":", 1)
+            value = int(value.strip().split()[0])
+            data[key] = value
+        return data
+
+    def get_usage(self):
+        data = MEMUsage.get_meminfo()
+        return 100 - 100. * data["MemAvailable"] / data["MemTotal"]
+
+    def setup(self):
+        self.meminfo = MEMUsage.get_meminfo()
+        self.threshold = float(self.parameter)
+
+    def initialize(self):
+        usage = self.get_usage()
+        status(0, self.PREFIX, "Startup mem usage is %2.2f%% (%d MiB)" % (usage, usage / 100 / 1024 * self.meminfo["MemTotal"]))
+
+    def wait_for_event(self):
+        while True:
+            time.sleep(1)
+            usage = self.get_usage()
+            status(0, self.PREFIX, "mem usage is %2.2f%% (%d MiB)" % (usage, usage / 100 / 1024 * self.meminfo["MemTotal"]), True)
+            if (usage < self.threshold) != self.negate_condition:
+                break
+# }}}
 # Movement {{{
 try:
     import cv2
