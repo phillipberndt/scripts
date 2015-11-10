@@ -323,8 +323,8 @@ class Timer(OnEvent):
         wait_until = datetime.datetime.now() + datetime.timedelta(seconds=self.time_seconds)
         status(0, self.PREFIX, "Waiting until %s" % (wait_until.isoformat(),))
         while True:
-            time_to_wait = (wait_until - datetime.datetime.now()).total_seconds() + 1
-            status(0, self.PREFIX, "Waiting until %s (%d seconds)" % (wait_until.isoformat(), time_to_wait), True)
+            time_to_wait = seconds_to_time((wait_until - datetime.datetime.now()).total_seconds() + 1)
+            status(0, self.PREFIX, "Waiting until %s (%s left)" % (wait_until.isoformat(), time_to_wait), True)
             time.sleep(time_to_wait if time_to_wait < 5 else 5)
 # }}}
 # CPU usage {{{
@@ -542,6 +542,16 @@ def is_executable(file_name):
         if os.access(os.path.join(path, file_name), os.X_OK | os.F_OK):
             return True
     return False
+
+def seconds_to_time(seconds):
+    output = []
+    if seconds > 3600:
+        output.append("%02d" % (seconds // 3600,))
+        seconds %= 3600
+    output.append("%02d" % (seconds // 60,))
+    seconds %= 60
+    output.append("%02d" % seconds)
+    return ":".join(output)
 
 class SupressOutput(object):
     def __enter__(self):
