@@ -387,7 +387,7 @@ class MEMUsage(OnEvent):
 
     def get_usage(self):
         data = MEMUsage.get_meminfo()
-        return 100 - 100. * data["MemAvailable"] / data["MemTotal"]
+        return 100 - 100. * (data["MemFree"] + data["Cached"] + data["Buffers"]) / data["MemTotal"]
 
     def setup(self):
         self.meminfo = MEMUsage.get_meminfo()
