@@ -151,3 +151,8 @@ Contents:
 * owncloudfs
 
   Mount public owncloud shares in userspace
+
+* mosh-firewall
+
+  suid wrapper for mosh-server that opens the port used for the connection in
+  the firewall for the duration of the session.

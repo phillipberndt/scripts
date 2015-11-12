@@ -1,0 +1,19 @@
+This is a wrapper for mosh-server that opens a port in the firewall for the
+mosh connection.
+
+Note: 
+
+This program has two security relevant race conditions. It uses kill (signal 0) to
+check if mosh is still running in 2 second intervals. Another process might start
+right after mosh quit and reuse the pid. This program would not realize this.
+Also, since it only checks every 2 seconds, another program might reuse the port
+mosh-server used right after mosh quit. Since most setups contain a conntrack rule
+that allows existing connections to continue, any connection opened within this
+two second window would persist.
+
+To install:
+
+dpkg-divert --add --rename --divert /usr/bin/mosh-server-real /usr/bin/mosh-server
+gcc -std=c99 -o /usr/bin/mosh-server mosh-server-firewall.c
+chown root:root /usr/bin/mosh-server
+chmod u+s /usr/bin/mosh-server
