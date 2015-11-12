@@ -13,6 +13,20 @@ released under the terms of the GNU Public License <http://www.gnu.org/licenses/
 
 Contents:
 
+* colors
+
+  Small tool to output the different console codes for the various colors.
+  I tend to forget them all the time.
+
+* conky_and_bg
+
+  My conky configuration, worker scripts and a hilarious™ script which
+  automatically changes your desktop image by a random choice from a
+  backgrounds directory - with support for dual screen setups and automatic
+  ImageMagick invocation to draw a semi-transparent box at the right edge of
+  the screen. Where conky resides. For X11 setups without RGBA extension, where
+  conky can not do this by itself.
+
 * gdo
 
   find(1)-like utility with support for
@@ -24,55 +38,6 @@ Contents:
       gdo regex +anotherregex <command>
 
   use $.. or %.. to backreference in the command.
-
-
-* passwrd
-
-  Meant to be bound to a hotkey. Searches for the active window's title,
-  decrypts a secret password file, searches for the correct password and enters
-  it automatically.
-
-  You'll need to use gpg-agent for this to work. No support for
-  passphrase-input-windows
-
-
-* runGraphical
-
-  Yet another program starter for X11. Define shortcuts and execute the
-  commands easily. For example, put
-
-      o opera
-
-  in the configuration file and start the program. Now you'll only need to hit
-  "o", and opera will start.
-
-
-* todo
-
-  Tiny todo file management with support for annotations like due date,
-  priorities and multiple hosts.
- 
-
-* unpack
-
-  Generic unpacker for a variety of formats. Takes care of not messing up your
-  $PWD. Can download files for you.
-
-
-* zshrc
-
-  My .zshrc (actually, ~/.zsh directory)
-
-
-* conky_and_bg
-
-  My conky configuration, worker scripts and a hilarious™ script which
-  automatically changes your desktop image by a random choice from a
-  backgrounds directory - with support for dual screen setups and automatic
-  ImageMagick invocation to draw a semi-transparent box at the right edge of
-  the screen. Where conky resides. For X11 setups without RGBA extension, where
-  conky can not do this by itself.
-
 
 * httpd
 
@@ -86,6 +51,29 @@ Contents:
   Monolithic instantaneous httpd and ftpd with support for everything you'd ever
   need to quickly move a from b to c. Including webdav.
 
+* libprivbind
+
+  A small library like privbind/authbind to bind to privileged ports based
+  on an access control list in /etc, with a Python module to access the
+  functionality. With this, pyprivbind.gensocket(80) will return a
+  socket.socket() bound to the HTTP-port.
+
+* livereload
+
+  An implementation of a livereload server backend. I know that tons of
+  ruby/node.js tools serve the same purpose, however, I wanted something
+  that is small and works out of the box on my PCs. (Which usually have
+  Python installed, but neither ruby nor node.)
+
+* lock
+
+  A very simple X11 locking app. Screen blanking & PAM authentication only.
+
+* mosh-firewall
+
+  suid wrapper for mosh-server that opens the port used for the connection in
+  the firewall for the duration of the session.
+
 * nonroot_apt
 
   1) A script for Debian based systems which allows non-root users to install
@@ -97,41 +85,24 @@ Contents:
      into a given directory. Useful to set up chroots.
   3) A script to use apt repositories from non-Debian distributions
 
-* venv
-  
-  A tool to setup virtual environments for more than just python. Also contains
-  a library which hooks into getpwent and replaces the home-directory with
-  $HOME - this is required in GTK apps since GTK ignores $HOME and uses passwd
-  entries instead.
-
-* lock
-
-  A very simple X11 locking app. Screen blanking & PAM authentication only.
-
-* pydoce
-
-  A tool to open python source code in an editor, not by specifying the file
-  name, but instead the pythonic path to a definition (i.e. os.path.isdir).
-
-* livereload
-
-  An implementation of a livereload server backend. I know that tons of
-  ruby/node.js tools serve the same purpose, however, I wanted something
-  that is small and works out of the box on my PCs. (Which usually have
-  Python installed, but neither ruby nor node.)
-
-* libprivbind
-
-  A small library like privbind/authbind to bind to privileged ports based
-  on an access control list in /etc, with a Python module to access the
-  functionality. With this, pyprivbind.gensocket(80) will return a
-  socket.socket() bound to the HTTP-port.
-
 * on
 
   Wait for some kind and event and then execute a command. Event types
   include inotify events (file changes), network throughput measurements,
   or that a certain process exits.
+
+* owncloudfs
+
+  Mount public owncloud shares in userspace
+
+* passwrd
+
+  Meant to be bound to a hotkey. Searches for the active window's title,
+  decrypts a secret password file, searches for the correct password and enters
+  it automatically.
+
+  You'll need to use gpg-agent for this to work. No support for
+  passphrase-input-windows
 
 * pskill
 
@@ -139,20 +110,42 @@ Contents:
   previews which processes it will kill, regex and fuzzy matching on full
   cmdline.
 
-* colors
+* pydoce
 
-  Small tool to output the different console codes for the various colors.
-  I tend to forget them all the time.
+  A tool to open python source code in an editor, not by specifying the file
+  name, but instead the pythonic path to a definition (i.e. os.path.isdir).
+
+* runGraphical
+
+  Yet another program starter for X11. Define shortcuts and execute the
+  commands easily. For example, put
+
+      o opera
+
+  in the configuration file and start the program. Now you'll only need to hit
+  "o", and opera will start.
+
+* todo
+
+  Tiny todo file management with support for annotations like due date,
+  priorities and multiple hosts.
+
+* unpack
+
+  Generic unpacker for a variety of formats. Takes care of not messing up your
+  $PWD. Can download files for you.
+
+* venv
+  
+  A tool to setup virtual environments for more than just python. Also contains
+  a library which hooks into getpwent and replaces the home-directory with
+  $HOME - this is required in GTK apps since GTK ignores $HOME and uses passwd
+  entries instead.
+
+* zshrc
+
+  My .zshrc (actually, ~/.zsh directory)
 
 * µredshift
 
   Tiny redshift alternative with only the most basic features.
-
-* owncloudfs
-
-  Mount public owncloud shares in userspace
-
-* mosh-firewall
-
-  suid wrapper for mosh-server that opens the port used for the connection in
-  the firewall for the duration of the session.
