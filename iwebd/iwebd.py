@@ -53,7 +53,7 @@ except ImportError:
 
 try:
     import gtk
-    has_gtk = True
+    has_gtk = not not gtk.gdk.get_display()
 except ImportError:
     has_gtk = False
 
