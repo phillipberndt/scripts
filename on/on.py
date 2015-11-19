@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # encoding: utf-8
+import Queue
 import datetime
 import fnmatch
 import getopt
@@ -149,6 +150,7 @@ if has_inotify:
         def setup(self):
             parameter = self.parameter
             self.ino = inotify.adapters.Inotify()
+
             self.globmatch = None
             if "*" in parameter:
                 self.globmatch = parameter
@@ -159,6 +161,11 @@ if has_inotify:
                 self.add_path(parameter)
                 status(0, self.PREFIX, "Watching for %s" % parameter)
 
+            self.ino_queue = Queue.Queue()
+            self.ino_thread = threading.Thread(target=self.__ino_consumer_thread)
+            self.ino_thread.daemon = True
+            self.ino_thread.start()
+
         def add_path(self, path):
             self.ino.add_watch(path, inotify.constants.IN_CLOSE_WRITE | inotify.constants.IN_CREATE)
             if os.path.isdir(path):
@@ -167,14 +174,23 @@ if has_inotify:
                     if os.path.isdir(sub_path):
                         self.add_path(sub_path)
 
-        def wait_for_event(self):
+        def __ino_consumer_thread(self):
             for event in self.ino.event_gen():
                 if event is not None:
                     header, type_names, fdir, filename = event
                     path = os.path.join(fdir, filename)
                     if self.globmatch is None or fnmatch.fnmatch(path, self.globmatch):
-                        status(0, self.PREFIX, "%s updated" % path, True)
-                        break
+                        self.ino_queue.put(path)
+
+        def initialize(self):
+            while not self.ino_queue.empty():
+                self.ino_queue.get()
+                self.ino_queue.task_done()
+
+        def wait_for_event(self):
+            path = self.ino_queue.get()
+            status(0, self.PREFIX, "%s updated" % path, True)
+            self.ino_queue.task_done()
             return path
 # }}}
 # Network throughput {{{
