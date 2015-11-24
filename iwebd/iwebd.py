@@ -418,16 +418,20 @@ class FtpHandler(SocketServer.StreamRequestHandler):
 
                 self.log(logging.INFO, "%(command)s %(path)s", command=command[0], path=path)
 
-                if command[0] == "NLST":
-                    response = StringIO.StringIO()
-                    response.write("\r\n".join(os.listdir(path or ".")))
-                    response.seek(0)
-                else:
-                    response = self.generate_directory_listing(path)
-                if command[0] == "STAT":
-                    self.reply("213 Status follows:\r\n%s\r\nEnd of status" % response.buf)
-                else:
-                    self.reply_with_file(response)
+                try:
+                    if command[0] == "NLST":
+                        response = StringIO.StringIO()
+                        response.write("\r\n".join(os.listdir(path or ".")))
+                        response.seek(0)
+                    else:
+                        response = self.generate_directory_listing(path)
+                    if command[0] == "STAT":
+                        self.reply("213 Status follows:\r\n%s\r\nEnd of status" % response.buf)
+                    else:
+                        self.reply_with_file(response)
+                except OSError:
+                    self.reply("550 Access denied or not possible")
+                    continue
                 continue
             elif command[0] == "SIZE":
                 target = self.build_path(command[1], expect="file")
