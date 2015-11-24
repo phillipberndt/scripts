@@ -429,7 +429,8 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                         self.reply("213 Status follows:\r\n%s\r\nEnd of status" % response.buf)
                     else:
                         self.reply_with_file(response)
-                except OSError:
+                except OSError as e:
+                    self.log(logging.WARNING, "Error on accessing %s: %s" % (path, e))
                     self.reply("550 Access denied or not possible")
                     continue
                 continue
