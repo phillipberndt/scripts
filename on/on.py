@@ -329,8 +329,21 @@ class Timer(OnEvent):
     PREFIX = "timer"
     PARAMETER_DESCRIPTION = "time"
 
+    TIME_SYNTAX = re.compile("(?P<at>@?)(?P<hour>[0-9]{1,2}):(?P<minute>[0-9]{1,2})(?:(?P<second>[0-9]{1,2}))?")
+
     def setup(self):
         self.time_seconds = 0
+
+        for match in Timer.TIME_SYNTAX.finditer(self.parameter):
+            if match.group("at"):
+                now = datetime.datetime.now()
+                wait_until = datetime.datetime.combine(now,
+                    datetime.time(int(match.group("hour")), int(match.group("minute")), int(match.group("second") or 0)))
+                self.time_seconds += (wait_until - now).total_seconds()
+            else:
+                self.time_seconds += int(match.group("hour")) * 3600 + int(match.group("minute")) * 60 + int(match.group("second") or 0)
+        self.parameter = Timer.TIME_SYNTAX.sub("", self.parameter)
+
         to_seconds = { "d": 3600*24, "h": 3600, "m": 60, "s": 1, "": 1 }
         for amount, unit in re.findall("([0-9\.]+)([hms]?)", self.parameter):
             self.time_seconds += float(amount) * to_seconds[unit]
