@@ -6,8 +6,8 @@
 	Available under the terms & conditions of the GPL v3.
 
 
-	Note: 
-	
+	Note:
+
 	This program has two security relevant race conditions. It uses kill (signal 0) to
 	check if mosh is still running in 2 second intervals. Another process might start
 	right after mosh quit and reuse the pid. This program would not realize this.
@@ -15,6 +15,8 @@
 	mosh-server used right after mosh quit. Since most setups contain a conntrack rule
 	that allows existing connections to continue, any connection opened within this
 	two second window would persist.
+
+	Both problems can be mitigated somewhat by using mywaitpid, but only on linux!
 
 	To install:
 
@@ -32,6 +34,10 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#ifdef __linux__
+	int mywaitpid(pid_t);
+#endif
 
 int main(int argc, char *argv[]) {
 	int pipefd[2];
@@ -109,9 +115,17 @@ int main(int argc, char *argv[]) {
 		wait(NULL);
 
 		// pid is not a child process, so use this technique to check if it is still alive
+#ifdef __linux__
+		if(mywaitpid(pid) != 0) {
+			while(kill(pid, 0) == 0) {
+				sleep(2);
+			}
+		}
+#else
 		while(kill(pid, 0) == 0) {
 			sleep(2);
 		}
+#endif
 
 		if(fork() == 0) {
 			execl("/sbin/iptables", "/sbin/iptables", "-D", "INPUT", "-p", "udp", "--dport", sport, "-j", "ACCEPT", "-m", "comment", "--comment", comment, NULL);
