@@ -15,10 +15,11 @@
     License: BSD-License
 
 """
-import inspect
 import importlib
+import inspect
 import os
 import sys
+import traceback
 
 # Select editor to use
 editor = os.environ["EDITOR"] if "EDITOR" in os.environ else "vim"
@@ -40,32 +41,44 @@ while imp_part:
     try:
         imp_name = ".".join(imp_part)
         mod = importlib.import_module(imp_name)
-    except ImportError, e:
+    except ImportError as e:
         if e.message[-len(imp_part[-1]):] == imp_part[-1] or e.message[-len(imp_name)] == imp_name:
             loc_part.insert(0, imp_part.pop())
             continue
+        fallback_file = sys.exc_traceback.tb_next.tb_next.tb_frame.f_code.co_filename
+        fallback_line = sys.exc_traceback.tb_next.tb_next.tb_frame.f_lineno
         print >> sys.stderr, "\033[31mImporting %s worked, but threw an exception:\n\033[0m" % imp_name
-        raise
-    except:
+        traceback.print_exc()
+        print >> sys.stderr
+    except Exception as e:
+        fallback_file = sys.exc_traceback.tb_next.tb_next.tb_frame.f_code.co_filename
+        fallback_line = sys.exc_traceback.tb_next.tb_next.tb_frame.f_lineno
         print >> sys.stderr, "\033[31mImporting %s worked, but threw an exception:\n\033[0m" % imp_name
-        raise
+        traceback.print_exc()
+        print >> sys.stderr
+        break
     else:
         break
-if not mod:
+
+if not mod and not fallback_file:
     print "Module %s not found" % sys.argv[1]
     sys.exit(1)
 
-# The module has been loaded above, now determine the local part. This is
-# required because a module might itself only import the desired symbol, and we
-# want to show the user that symbol's definition, not the import
-obj = mod
+if mod:
+    # The module has been loaded above, now determine the local part. This is
+    # required because a module might itself only import the desired symbol, and we
+    # want to show the user that symbol's definition, not the import
+    obj = mod
 
-while loc_part:
-    obj = getattr(obj, loc_part.pop(0))
+    while loc_part:
+        obj = getattr(obj, loc_part.pop(0))
 
-# Use the inspect module to determine file/line of defition
-file = inspect.getsourcefile(obj)
-_, line = inspect.getsourcelines(obj)
+    # Use the inspect module to determine file/line of defition
+    file = inspect.getsourcefile(obj)
+    _, line = inspect.getsourcelines(obj)
+else:
+    print >> sys.stderr, "\033[33mAs a fallback, opening the file that raised the exception\033[0m"
+    file, line = fallback_file, fallback_line
 
 # Some editors might support to jump to a line directly
 params = []
