@@ -43,6 +43,16 @@ def query_procfs(pid):
         return {"pid": pid, "cmd_line": cmd_line, "owner": owner}
     return None
 
+def ppid_cascade(pid=None):
+    if pid is None:
+        pid = os.getpid()
+    while True:
+        try:
+            pid = int(re.search("PPid:\s+([0-9]+)", open("/proc/%d/status" % pid).read()).group(1))
+            yield pid
+        except:
+            break
+
 def get_x11_list(for_uid=None):
     try:
         import socket
@@ -57,6 +67,8 @@ def get_x11_list(for_uid=None):
     wm_name_atom = dpy.get_atom("_NET_WM_NAME")
     hostname = socket.gethostname()
 
+    protected_pids = list(ppid_cascade())
+
     for wnd_id in dpy.screen().root.get_property(cl_atom, 0, 0, 10000).value:
         wnd = dpy.create_resource_object("window", wnd_id)
         host = wnd.get_wm_client_machine()
@@ -67,6 +79,9 @@ def get_x11_list(for_uid=None):
             continue
         pid = pid.value[0]
         name = wnd.get_property(wm_name_atom, 0, 0, 10000).value
+
+        if pid in protected_pids:
+            continue
 
         data = query_procfs(pid)
         if data and (for_uid is None or for_uid == 0 or data["owner"] == for_uid):
