@@ -757,6 +757,12 @@ def main():
                 proc.terminate()
                 proc.wait()
         if action:
+            if "-r" not in opts and "-o" not in opts:
+                if not is_executable(action[0]):
+                    action = [ "/bin/sh", "-c" ] + action
+                os.execvp(action[0], action)
+                status(2, "on", "Failed to execute command")
+                os.exit(1)
             if is_executable(action[0]):
                 proc = subprocess.Popen(action, stdout=ptarget, stderr=ptarget, preexec_fn=preexec_fn)
             else:
