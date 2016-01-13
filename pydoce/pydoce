@@ -5,7 +5,7 @@
     Open the definition of a python obect in an editor
 
     Usage:
-        pydoce path.to.object
+        pydoce [-23] path.to.object
 
     Examples:
         pydoce os.path.isdir
@@ -15,6 +15,8 @@
     License: BSD-License
 
 """
+from __future__ import print_function
+
 import importlib
 import inspect
 import os
@@ -26,9 +28,16 @@ editor = os.environ["EDITOR"] if "EDITOR" in os.environ else "vim"
 if editor == "vim" and "DISPLAY" in os.environ:
     editor = "gvim"
 
+# Python 2/3 support
+if len(sys.argv) > 1 and sys.argv[1] in ("-2", "-3"):
+    desired_version = int(sys.argv[1][1])
+    if sys.version_info.major != desired_version:
+        os.execvp("python%d" % desired_version, ["python%d" % desired_version, sys.argv[0],] + sys.argv[1:])
+    sys.argv = [sys.argv[0]] + sys.argv[2:]
+
 # Show a short help
 if len(sys.argv) != 2:
-    print >> sys.stderr, __doc__
+    print(__doc__, file=sys.stderr)
     sys.exit(0)
 
 # Split path argument into module and local part For example, in os.path.isdir,
@@ -47,21 +56,21 @@ while imp_part:
             continue
         fallback_file = sys.exc_traceback.tb_next.tb_next.tb_frame.f_code.co_filename
         fallback_line = sys.exc_traceback.tb_next.tb_next.tb_frame.f_lineno
-        print >> sys.stderr, "\033[31mImporting %s worked, but threw an exception:\n\033[0m" % imp_name
+        print("\033[31mImporting %s worked, but threw an exception:\n\033[0m" % imp_name, file=sys.stderr)
         traceback.print_exc()
-        print >> sys.stderr
+        print("", file=sys.stderr)
     except Exception as e:
         fallback_file = sys.exc_traceback.tb_next.tb_next.tb_frame.f_code.co_filename
         fallback_line = sys.exc_traceback.tb_next.tb_next.tb_frame.f_lineno
-        print >> sys.stderr, "\033[31mImporting %s worked, but threw an exception:\n\033[0m" % imp_name
+        print("\033[31mImporting %s worked, but threw an exception:\n\033[0m" % imp_name, file=sys.stderr)
         traceback.print_exc()
-        print >> sys.stderr
+        print("", file=sys.stderr)
         break
     else:
         break
 
 if not mod and not fallback_file:
-    print "Module %s not found" % sys.argv[1]
+    print("Module %s not found" % sys.argv[1], file=sys.stderr)
     sys.exit(1)
 
 if mod:
@@ -77,7 +86,7 @@ if mod:
     file = inspect.getsourcefile(obj)
     _, line = inspect.getsourcelines(obj)
 else:
-    print >> sys.stderr, "\033[33mAs a fallback, opening the file that raised the exception\033[0m"
+    print("\033[33mAs a fallback, opening the file that raised the exception\033[0m", file=sys.stderr)
     file, line = fallback_file, fallback_line
 
 # Some editors might support to jump to a line directly
