@@ -111,6 +111,7 @@ int main(int argc, char *argv[]) {
 
 		if(fork() == 0) {
 			execl("/sbin/iptables", "/sbin/iptables", "-I", "INPUT", "1", "-p", "udp", "--dport", sport, "-j", "ACCEPT", "-m", "comment", "--comment", comment, NULL);
+			exit(1);
 		}
 		wait(NULL);
 
@@ -129,6 +130,7 @@ int main(int argc, char *argv[]) {
 
 		if(fork() == 0) {
 			execl("/sbin/iptables", "/sbin/iptables", "-D", "INPUT", "-p", "udp", "--dport", sport, "-j", "ACCEPT", "-m", "comment", "--comment", comment, NULL);
+			exit(1);
 		}
 		wait(NULL);
 
