@@ -11,6 +11,10 @@ mosh-server used right after mosh quit. Since most setups contain a conntrack ru
 that allows existing connections to continue, any connection opened within this
 two second window would persist.
 
+On Linux, the first issue is mitigated by using the Netlink interface to procfs
+to monitor the process. The second still exists, but the window for opening
+another connection is considerably shorter.
+
 To install:
 
 dpkg-divert --add --rename --divert /usr/bin/mosh-server-real /usr/bin/mosh-server
