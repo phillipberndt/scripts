@@ -13,6 +13,11 @@ released under the terms of the GNU Public License <http://www.gnu.org/licenses/
 
 Contents:
 
+* check_integrity
+
+  Basic, non-hack-proof system integrity checker informing root about
+  updated/new files.
+
 * colors
 
   Small tool to output the different console codes for the various colors.

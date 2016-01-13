@@ -1,0 +1,4 @@
+#!/bin/sh
+export PYTHONIOENCODING="UTF-8:backslashreplace"
+export LC_CTYPE="en_US.UTF-8"
+/usr/local/sbin/check-integrity 2>&1 | mail -E -s "$(hostname): System files changed" root
