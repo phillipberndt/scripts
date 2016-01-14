@@ -18,6 +18,7 @@
     once, because check_integrity then updates its database.)
 """
 import collections
+import configparser
 import ctypes
 import glob
 import hashlib
@@ -26,16 +27,27 @@ import os
 import shelve
 import warnings
 
-# Location of the file database; can be world readable, because
-# it only stores hashes
-DATABASE_FILE = "/var/lib/verify"
+default_settings = {
+    # Location of the file database; can be world readable, because
+    # it only stores hashes
+    "database_file": "/var/lib/verify",
 
-# Directories to generally ignore for files from system_md5sums()
-BANNED_PACKAGE_ROOTS = ("/var", "/opt")
+    # Directories to generally ignore for files from system_md5sums()
+    "banned_package_roots": "\n".join(("/var", "/opt")),
 
-# Directories in the system root that do not contain files from
-# system_md5sums that should be ignored
-BANNED_ROOTS = ("/proc", "/sys", "/dev")
+    # Directories in the system root that do not contain files from
+    # system_md5sums that should be ignored
+    "banned_roots": "\n".join(("/proc", "/sys", "/dev")),
+
+    # Permanently ignore the following files/dirs
+    "ignored_files": "",
+    "ignored_dirs": "",
+}
+
+# To adjust these settings, use the configuration file
+config = configparser.ConfigParser(defaults=default_settings)
+config.read([ "/etc/check_integrity.ini", "/usr/share/check_integrity/check_integrity.ini" ])
+config = config["DEFAULT"]
 
 try:
     libcap = ctypes.CDLL("libcap.so.2")
@@ -136,19 +148,27 @@ def output(filename, status):
 if __name__ == "__main__":
     os.nice(10)
 
-    database = shelve.open(DATABASE_FILE) # entries are tuples: (md5sum, capability md5sum, suid/sgid digit)
+    database = shelve.open(config["database_file"]) # entries are tuples: (md5sum, capability md5sum, suid/sgid digit)
 
     os_files = system_md5sums()
 
-    system_roots = list(filter(lambda x: os.path.isdir(x) and x not in BANNED_PACKAGE_ROOTS, {"/%s" % x[1:].split("/")[0] for x in os_files.keys()}))
-    suid_check_roots = filter(lambda x: os.path.isdir("/%s" % x) and "/%s" % x not in system_roots and "/%s" % x not in BANNED_ROOTS, os.listdir("/"))
+    system_roots = list(filter(lambda x: os.path.isdir(x) and x not in config["banned_package_roots"], {"/%s" % x[1:].split("/")[0] for x in os_files.keys()}))
+    suid_check_roots = filter(lambda x: os.path.isdir("/%s" % x) and "/%s" % x not in system_roots and "/%s" % x not in config["banned_roots"], os.listdir("/"))
 
     files = itertools.chain(
         itertools.chain(*map(list_files_with_md5sum, system_roots)),
         itertools.chain(*(annotate_files_with_md5sum(list_files_with_enhanced_caps(x)) for x in suid_check_roots)),
         annotate_files_with_md5sum(filter(os.path.isfile, os.listdir("/")))
     )
+
+    ignored_files = config["ignored_files"].split("\n")
+    ignored_dirs = config["ignored_dirs"].split("\n")
+
     for filename, hashsum in files:
+        if filename in ignored_files:
+            continue
+        if any((filename[:len(x)] == x for x in ignored_dirs)):
+            continue
         filename_md5 = md5sum_buf(filename.encode("unicode_escape"))
         is_known = filename_md5 in database
 
