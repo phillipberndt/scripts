@@ -8,15 +8,47 @@
 import PIL.Image
 import PIL.ImageDraw
 import os
+import subprocess
 import random
 import re
 import time
+try:
+    import cStringIO as StringIO
+except:
+    import StringIO
 try:
     import numpy as np
     import scipy.interpolate
     CAN_DO_GRADIENTS=True
 except:
     CAN_DO_GRADIENTS=False
+
+if subprocess.call("which convert >/dev/null 2>&1", shell=True) == 0:
+    HAS_IMAGICK = True
+else:
+    HAS_IMAGICK = False
+
+try:
+    import psutil
+    HAS_PSUTIL = True
+except:
+    HAS_PSUTIL = False
+
+def nice():
+    os.nice(10)
+    if HAS_PSUTIL:
+        psutil.Process().ionice(psutil.IOPRIO_CLASS_IDLE)
+
+def liquid_rescale(img, target_size):
+    buf = StringIO.StringIO()
+    img.save(buf, "bmp")
+    imagick = subprocess.Popen(["/usr/bin/convert", "bmp:-", "-liquid-rescale", "%s!" % "x".join(map(str, target_size)), "bmp:-"], stdout=subprocess.PIPE, stdin=subprocess.PIPE, preexec_fn=nice)
+    out, err = imagick.communicate(buf.getvalue())
+    if err:
+        print err
+    return PIL.Image.open(StringIO.StringIO(out))
+
+nice()
 
 imgdir = os.path.expanduser("~/.bg/")
 randr = os.popen("xrandr -q").read()
@@ -43,7 +75,11 @@ for no in range(len(screens)):
 			output_size[0] = output_size[0] * screen[1] / output_size[1];
 			output_size[1] = screen[1]
 
-	image = image.resize(output_size)
+        if HAS_IMAGICK and (output_size[0] < screen[0] - 100 or output_size[1] < screen[1] - 100):
+            image = liquid_rescale(image, screen[:2])
+            output_size = screen[:2]
+        else:
+            image = image.resize(output_size)
 	output_top = (screen[1] - output_size[1]) / 2
 	output_left = (screen[0] - output_size[0]) / 2
 
