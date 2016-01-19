@@ -76,6 +76,9 @@ for no in range(len(screens)):
 			output_size[1] = screen[1]
 
         if HAS_IMAGICK and (output_size[0] < screen[0] - 100 or output_size[1] < screen[1] - 100):
+            if image.size[0] > screen[0] and image.size[1] > screen[1]:
+                multiplier = max((screen[0] * 1. / image.size[0], screen[1] * 1. / image.size[1]))
+                image = image.resize(map(int, (screen[0] * multiplier, screen[1] * multiplier)))
             image = liquid_rescale(image, screen[:2])
             output_size = screen[:2]
         else:
