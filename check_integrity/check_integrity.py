@@ -158,12 +158,12 @@ if __name__ == "__main__":
     ignored_dirs  = filter(None, config["ignored_dirs"].split("\n"))
 
     system_roots = list(filter(lambda x: os.path.isdir(x) and x not in banned_package_roots, {"/%s" % x[1:].split("/")[0] for x in os_files.keys()}))
-    suid_check_roots = filter(lambda x: os.path.isdir("/%s" % x) and "/%s" % x not in system_roots and "/%s" % x not in banned_roots, os.listdir("/"))
+    suid_check_roots = ("/%s" % x for x in os.listdir("/") if os.path.isdir("/%s" % x) and "/%s" % x not in system_roots and "/%s" % x not in banned_roots)
 
     files = itertools.chain(
         itertools.chain(*map(list_files_with_md5sum, system_roots)),
         itertools.chain(*(annotate_files_with_md5sum(list_files_with_enhanced_caps(x)) for x in suid_check_roots)),
-        annotate_files_with_md5sum(filter(os.path.isfile, os.listdir("/")))
+        annotate_files_with_md5sum(("/%s" % x for x in os.listdir("/") if os.path.isfile("/%s" % x)))
     )
 
     for filename, hashsum in files:
