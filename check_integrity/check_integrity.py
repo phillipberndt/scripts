@@ -27,6 +27,8 @@ import os
 import shelve
 import warnings
 
+# To adjust these settings, use the configuration file
+# /etc/check_integrity.ini
 default_settings = {
     # Location of the file database; can be world readable, because
     # it only stores hashes
@@ -43,11 +45,6 @@ default_settings = {
     "ignored_files": "",
     "ignored_dirs": "",
 }
-
-# To adjust these settings, use the configuration file
-config = configparser.ConfigParser(defaults=default_settings)
-config.read([ "/etc/check_integrity.ini", "/usr/share/check_integrity/check_integrity.ini" ])
-config = config["DEFAULT"]
 
 try:
     libcap = ctypes.CDLL("libcap.so.2")
@@ -146,16 +143,20 @@ def output(filename, status):
         print("%-60s '%s'" % (status, filename.encode("ascii", errors="backslashreplace").decode()))
 
 if __name__ == "__main__":
+    config = configparser.ConfigParser(defaults=default_settings)
+    config.read([ "/etc/check_integrity.ini", "/usr/share/check_integrity/check_integrity.ini" ])
+    config = config["DEFAULT"]
+
     os.nice(10)
 
     database = shelve.open(config["database_file"]) # entries are tuples: (md5sum, capability md5sum, suid/sgid digit)
 
     os_files = system_md5sums()
 
-    banned_package_roots = filter(None, config["banned_package_roots"].split("\n"))
-    banned_roots  = filter(None, config["banned_roots"].split("\n"))
-    ignored_files = filter(None, config["ignored_files"].split("\n"))
-    ignored_dirs  = filter(None, config["ignored_dirs"].split("\n"))
+    banned_package_roots = list(filter(None, config["banned_package_roots"].split("\n")))
+    banned_roots  = list(filter(None, config["banned_roots"].split("\n")))
+    ignored_files = list(filter(None, config["ignored_files"].split("\n")))
+    ignored_dirs  = list(filter(None, config["ignored_dirs"].split("\n")))
 
     system_roots = list(filter(lambda x: os.path.isdir(x) and x not in banned_package_roots, {"/%s" % x[1:].split("/")[0] for x in os_files.keys()}))
     suid_check_roots = ("/%s" % x for x in os.listdir("/") if os.path.isdir("/%s" % x) and "/%s" % x not in system_roots and "/%s" % x not in banned_roots)
