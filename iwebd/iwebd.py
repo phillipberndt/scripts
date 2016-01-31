@@ -795,21 +795,19 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     LIVE_RELOAD_JS = """
         window.addEventListener("load", function(e) {
             var urls = [];
+            urls.push(document.location.pathname);
             for(var url of performance.getEntries()) {
                 if(url.name.substring(0, location.protocol.length + 2 + location.host.length) == location.protocol + "//" + location.host) {
                     urls.push(encodeURIComponent(url.name.substring(location.protocol.length + 2 + location.host.length).replace(/\?.+/, "")));
                 }
             }
-            urls = urls.join("&");
-            var evt = new EventSource("/.live-reload/feed?" + urls);
+            var urls_str = urls.join("&");
+            var evt = new EventSource("/.live-reload/feed?" + urls_str);
             evt.onmessage = function(msg) {
-                for(var url of performance.getEntries()) {
-                    var rpath = url.name.match(/^https?:\/\/[^\/]+(\/[^\?]*)(\?.*)?$/);
-                    if(rpath) {
-                        if(rpath[1] == msg.data) {
-                            location.reload();
-                            return;
-                        }
+                for(var url of urls) {
+                    if(url.indexOf(msg.data) >= 0) {
+                        location.reload();
+                        return;
                     }
                 }
             }
