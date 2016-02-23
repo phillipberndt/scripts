@@ -102,6 +102,7 @@ class OnPIDExit(OnEvent):
             pid_list = [ int(parameter) ]
             if not OnPIDExit.is_alive(pid_list[0]):
                 raise ValueError("PID %d does not belong to an existing process" % pid_list[0])
+            status(0, self.PREFIX, "Waiting for any of %d processes to exit" % len(pid_list))
         except ValueError:
             processes = dict(OnPIDExit.pgrep(parameter))
             if str(os.getpid()) in processes:
