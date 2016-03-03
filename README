@@ -123,8 +123,7 @@ Contents:
 * sshproxy
 
   Convenience tool to setup a chain of ProxyCommand options to enter a
-  multi-hop SSH connection. Requires netcat (nc) on all hosts, but can
-  be easily modified to support other tools as well.
+  multi-hop SSH connection.
 
 * runGraphical
 
