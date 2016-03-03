@@ -51,9 +51,9 @@ def build_ssh_command_line(levels, args):
     while len(levels) > 1:
         host, port, options = levels.pop(0)
         if command_line:
-            command_line = " ".join([ "ssh", "-o", shell_quote("ProxyCommand=%s" % command_line) ] + list(map(shell_quote, options)) + [ "-W", shell_quote("%s:%d" % levels[0][:2]), shell_quote(host) ])
+            command_line = " ".join([ "ssh", "-o", shell_quote("ProxyCommand=%s" % command_line.replace('%', '%%')) ] + list(map(shell_quote, options)) + [ "-W", "%h:%p", shell_quote(host) ])
         else:
-            command_line = " ".join([ "ssh", "-p", str(port) ] + list(map(shell_quote, options)) + [ "-W", shell_quote("%s:%d" % levels[0][:2]), shell_quote(host) ])
+            command_line = " ".join([ "ssh", "-p", str(port) ] + list(map(shell_quote, options)) + [ "-W", "%h:%p", shell_quote(host) ])
 
     host, port, options = levels.pop(0)
     if command_line:
