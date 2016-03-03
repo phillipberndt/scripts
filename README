@@ -120,6 +120,12 @@ Contents:
   A tool to open python source code in an editor, not by specifying the file
   name, but instead the pythonic path to a definition (i.e. os.path.isdir).
 
+* sshproxy
+
+  Convenience tool to setup a chain of ProxyCommand options to enter a
+  multi-hop SSH connection. Requires netcat (nc) on all hosts, but can
+  be easily modified to support other tools as well.
+
 * runGraphical
 
   Yet another program starter for X11. Define shortcuts and execute the
