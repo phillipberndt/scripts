@@ -150,38 +150,48 @@ if has_inotify:
 
         def setup(self):
             parameter = self.parameter
-            self.ino = inotify.adapters.Inotify()
+            self._paths = []
 
             self.globmatch = None
             if "*" in parameter:
                 self.globmatch = parameter
                 path = os.path.dirname(parameter.split("*", 1)[0]) or "."
-                self.add_path(path)
+                self._paths.append(path)
                 status(0, self.PREFIX, "Watching for %s in folder %s" % (parameter, path))
             else:
-                self.add_path(parameter)
+                self._paths.append(parameter)
                 status(0, self.PREFIX, "Watching for %s" % parameter)
 
             self.ino_queue = Queue.Queue()
-            self.ino_thread = threading.Thread(target=self.__ino_consumer_thread)
-            self.ino_thread.daemon = True
-            self.ino_thread.start()
+            self.setup_inotify()
 
-        def add_path(self, path):
+        def _add_path_internal(self, path):
             self.ino.add_watch(path, inotify.constants.IN_CLOSE_WRITE | inotify.constants.IN_CREATE)
             if os.path.isdir(path):
                 for elem in os.listdir(path):
                     sub_path = os.path.join(path, elem)
                     if os.path.isdir(sub_path):
-                        self.add_path(sub_path)
+                        self._add_path_internal(sub_path)
+
+        def setup_inotify(self):
+            self.ino = inotify.adapters.Inotify()
+            for path in self._paths:
+                self._add_path_internal(path)
+            self.ino_thread = threading.Thread(target=self.__ino_consumer_thread)
+            self.ino_thread.daemon = True
+            self.ino_thread.start()
 
         def __ino_consumer_thread(self):
-            for event in self.ino.event_gen():
-                if event is not None:
-                    header, type_names, fdir, filename = event
-                    path = os.path.join(fdir, filename)
-                    if self.globmatch is None or fnmatch.fnmatch(path, self.globmatch):
-                        self.ino_queue.put(path)
+            try:
+                for event in self.ino.event_gen():
+                    if event is not None:
+                        header, type_names, fdir, filename = event
+                        path = os.path.join(fdir, filename)
+                        if self.globmatch is None or fnmatch.fnmatch(path, self.globmatch):
+                            self.ino_queue.put(path)
+            except IOError as e:
+                if e.errno == 4: # EINTR
+                    self.setup_inotify()
 
         def initialize(self):
             while not self.ino_queue.empty():
