@@ -104,6 +104,7 @@ alias aspell="aspell --lang DE"
 alias rm="rm -i"
 alias l="ls"
 alias cp="cp -i"
+alias mv="mv -i"
 alias mysql="mysql -u root"
 
 # Some functions
