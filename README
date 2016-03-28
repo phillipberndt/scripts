@@ -140,6 +140,19 @@ Contents:
   Tiny todo file management with support for annotations like due date,
   priorities and multiple hosts.
 
+* tunsocks
+
+  Tunsocks is a program that runs other programs such that all their network
+  traffic is transparently proxied through a SOCKS5 proxy. In comparison with
+  tsocks, it runs without LD_PRELOAD, but by creating a TUN device, and in
+  comparison with e.g. redocks, it does not use iptables, but network namespace
+  isolation instead. This allows to easily force single processes to use a
+  proxy, in a quite bullet proof fashion: Unless tunsocks itself is
+  exploitable, there is no way to access the outside world through the network
+  other than the socks tunnel. Note that this does not isolate the process
+  from other processes or the file system, both of which might allow other
+  ways to circumvent this!
+
 * unpack
 
   Generic unpacker for a variety of formats. Takes care of not messing up your
