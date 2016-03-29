@@ -123,6 +123,7 @@ class TunDevice {
 		}
 
 		void assign_tun_route() {
+			// Assign default route
 			int sock = socket(AF_INET, SOCK_DGRAM, 0);
 
 			struct linux_route::rtentry rt;
@@ -144,6 +145,11 @@ class TunDevice {
 
 			ioctl(sock, SIOCADDRT, &rt);
 			close(sock);
+
+			// Adjust sysctl to allow routing of the 127.0.0.0/8 block;
+			// required to allow processing of DNS requests to localhost
+			std::ofstream(std::string("/proc/sys/net/ipv4/conf/") + if_name + std::string("/route_localnet")) << "1\n";
+			std::ofstream(std::string("/proc/sys/net/ipv4/conf/") + if_name + std::string("/accept_local"))   << "1\n";
 		}
 
 
