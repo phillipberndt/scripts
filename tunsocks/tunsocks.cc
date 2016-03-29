@@ -34,11 +34,12 @@
 //    application is tunneling through SSH, which does not support SSH)
 //  * Adjust the different MTUs assumed all over the code to match ;-)
 //
-#include <string>
-#include <stdexcept>
-#include <iostream>
+#include <fstream>
 #include <functional>
+#include <iostream>
 #include <map>
+#include <stdexcept>
+#include <string>
 #include <tuple>
 
 #include <tins/tins.h>
@@ -98,8 +99,7 @@ class TunDevice {
 		void assign_tun_ip() {
 			int sock = socket(AF_INET, SOCK_DGRAM, 0);
 
-			struct ifreq ifr;
-			memset(&ifr, 0, sizeof(ifr));
+			struct ifreq ifr = {};
 			strncpy(ifr.ifr_name, if_name.c_str(), IFNAMSIZ);
 			ifr.ifr_addr.sa_family = AF_INET;
 			struct sockaddr_in* addr = (struct sockaddr_in*)&ifr.ifr_addr;
