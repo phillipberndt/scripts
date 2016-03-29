@@ -228,9 +228,9 @@ class ProxiedConnection {
 		// Called when the socks server closed the connection
 		virtual void on_socks_connection_lost() { };
 
-		void socks_connect(uint8_t cmd, uint32_t port) {
+		void socks_connect(uint8_t cmd, uint32_t target_address, uint32_t port) {
 			// Connect to socks
-			socks_socket.async_connect(socks_address, [this, cmd, port] (const boost::system::error_code& error) {
+			socks_socket.async_connect(socks_address, [this, cmd, target_address, port] (const boost::system::error_code& error) {
 				if(error) {
 					std::cerr << status_prefix << "Failed to connect to socks proxy " << socks_address << "\n";
 					on_connect_failure();
@@ -243,7 +243,7 @@ class ProxiedConnection {
 
 				// Authenticate
 				boost::asio::write(socks_socket, boost::asio::buffer(std::vector<uint8_t> { 5, 1, 0 })); // Version 5, one auth method, namely 0 == no authenentication
-				socks_socket.async_receive(boost::asio::buffer(&socks_receive_buffer[0], 2), [this, cmd, port] (const boost::system::error_code& error, std::size_t bytes_transferred) {
+				socks_socket.async_receive(boost::asio::buffer(&socks_receive_buffer[0], 2), [this, cmd, target_address, port] (const boost::system::error_code& error, std::size_t bytes_transferred) {
 					if(error || socks_receive_buffer[0] != 5 || socks_receive_buffer[1] != 0) {
 						std::cerr << status_prefix << "Socks proxy refuses authentication attempt\n";
 						on_connect_failure();
@@ -257,11 +257,10 @@ class ProxiedConnection {
 					connection_request.push_back(cmd); // Command: 1 is connect, 3 UDP connect
 					connection_request.push_back(0);   // Reserved
 					connection_request.push_back(1);   // Address type: v4 address
-					int target_address_be = (uint32_t)response_template.src_addr();
-					connection_request.push_back((target_address_be & 0xff));
-					connection_request.push_back((target_address_be & 0xff00) >> 8);
-					connection_request.push_back((target_address_be & 0xff0000) >> 16);
-					connection_request.push_back((target_address_be & 0xff000000) >> 24);   // v4 address: 4 bytes
+					connection_request.push_back((target_address & 0xff));
+					connection_request.push_back((target_address & 0xff00) >> 8);
+					connection_request.push_back((target_address & 0xff0000) >> 16);
+					connection_request.push_back((target_address & 0xff000000) >> 24);   // v4 address: 4 bytes
 					connection_request.push_back((port & 0xff00) >> 8);                     // v4 port: 2 bytes
 					connection_request.push_back(port & 0x00ff);
 
@@ -410,7 +409,7 @@ class ProxiedTCPConnection : public ProxiedConnection {
 				// Safe to ignore; initial SYN had no payload
 			}
 
-			socks_connect(1 /* CONNECT */, tcp->dport());
+			socks_connect(1 /* CONNECT */, packet.dst_addr(), tcp->dport());
 		}
 
 		void handle_tun_packet(Tins::IP packet) {
@@ -494,7 +493,13 @@ class ProxiedUDPDNSConnection : public ProxiedConnection {
 				return;
 			}
 
-			socks_connect(1, udp->dport());
+			// Redirect requests to 127.0.0.0/8 to Google's DNS
+			uint32_t target_address = packet.dst_addr();
+			if(packet.dst_addr().is_loopback()) {
+				target_address = Tins::IPv4Address("8.8.8.8");
+			}
+
+			socks_connect(1, target_address, udp->dport());
 		}
 
 		void handle_tun_packet(Tins::IP packet) {
