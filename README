@@ -4,10 +4,11 @@ individual repositories.
 
 I mainly put this up here so that I can easily move into new computers' $HOMEs.
 Don't expect too much documentation. But feel free to contact me if you have
-any questions.
+any questions. In particular, please contact me if you want to package one of
+these programs - I'll move them into individual repositories in that case.
 
 Unless stated otherwise in specific files, everything within this repository is
-released under the terms of the GNU Public License <http://www.gnu.org/licenses/gpl-3.0.html>.
+released under the terms of the GNU Public License 3.0 <http://www.gnu.org/licenses/gpl-3.0.html>.
 
 
 
