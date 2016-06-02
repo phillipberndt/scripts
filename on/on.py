@@ -187,7 +187,7 @@ if has_inotify:
                     if event is not None:
                         header, type_names, fdir, filename = event
                         path = os.path.join(fdir, filename)
-                        if self.globmatch is None or fnmatch.fnmatch(path, self.globmatch):
+                        if self.globmatch is None or fnmatch_with_braces(path, self.globmatch):
                             self.ino_queue.put(path)
             except IOError as e:
                 if e.errno == 4: # EINTR
@@ -618,6 +618,21 @@ def readline_timout(query, default, timeout=0, expect=None):
 def is_executable(file_name):
     for path in os.environ["PATH"].split(":"):
         if os.access(os.path.join(path, file_name), os.X_OK | os.F_OK):
+            return True
+    return False
+
+def fnmatch_with_braces(path, pattern):
+    if not "{" in pattern:
+        return fnmatch.fnmatch(path, pattern)
+    start_index = pattern.find("{")
+    start = pattern[:start_index]
+    end_index = pattern.find("}", start_index)
+    if not end_index:
+        return fnmatch.fnmatch(path, pattern)
+    end = pattern[end_index+1:]
+    cases = pattern[start_index+1:end_index].split(",")
+    for case in cases:
+        if fnmatch_with_braces(path, "".join((start, case, end))):
             return True
     return False
 
