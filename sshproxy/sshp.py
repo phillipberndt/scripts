@@ -5,6 +5,7 @@ import os
 import sys
 
 SSH_PARAMETERS_WITHOUT_ARGUMENTS = "1246AaCfgKkMNnqsTtVvXxYy"
+SSH_PARAMETERS_FOR_LAST_HOP = "AXY"
 
 def shell_quote(s):
     if " " in s or "'" in s or ";" in s or "\"" in s:
@@ -15,6 +16,7 @@ def split_ssh_calls(args):
     options = []
     levels  = []
     port    = 22
+    last_hop_options = []
 
     while args:
         arg = args.pop(0)
@@ -25,16 +27,20 @@ def split_ssh_calls(args):
             arg.pop(0)
             while arg:
                 char = arg.pop(0)
-                options.append("-%c" % char)
+                if char in SSH_PARAMETERS_FOR_LAST_HOP:
+                    curr_opts = last_hop_options
+                else:
+                    curr_opts = options
+                curr_opts.append("-%c" % char)
                 if char not in SSH_PARAMETERS_WITHOUT_ARGUMENTS:
                     if arg:
-                        options.append("".join(arg))
-                        break
+                        curr_opts.append("".join(arg))
                     else:
-                        options.append(args.pop(0))
-                        break
+                        curr_opts.append(args.pop(0))
                     if char == "p":
-                        port = int(options.pop())
+                        port = int(curr_opts.pop())
+                        curr_opts.pop()
+                    break
         else:
             host = arg
             if ":" in host:
@@ -43,6 +49,9 @@ def split_ssh_calls(args):
             levels.append((host, port, options))
             options = []
             port = 22
+
+    if last_hop_options:
+        levels = levels[:-1] + [ (levels[-1][0], levels[-1][1], levels[-1][2] + last_hop_options) ]
 
     return levels, args
 
@@ -57,7 +66,7 @@ def build_ssh_command_line(levels, args):
 
     host, port, options = levels.pop(0)
     if command_line:
-        return [ "ssh", "-o", "ProxyCommand=%s" % command_line ] + options + [ host ] + args
+        return [ "ssh", "-o", "ProxyCommand=%s" % command_line, "-p", str(port) ] + options + [ host ] + args
     else:
         return [ "ssh", "-p", str(port) ] + options + [ host ] + args
 
