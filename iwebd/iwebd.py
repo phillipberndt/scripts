@@ -884,8 +884,13 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         try:
             line = None
             while not line:
-                line = self.rfile.readline().strip()
+                line = self.rfile.readline()
+                if not line:
+                    raise socket.error()
+                line = line.strip()
             self.method, self.path, self.http_version = line.split()
+        except socket.error:
+            raise
         except:
             self.method = "GET"
             self.path = "/"
@@ -977,7 +982,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     headers["Connection"] = "Keep-Alive"
             else:
                 if "connection" not in self.headers or self.headers["connection"][0] != "close":
-                    pass
+                    headers["Connection"] = "Keep-Alive"
+                    self.do_keep_alive = True
                 else:
                     headers["Connection"] = "Close"
                     self.do_keep_alive = False
@@ -1515,7 +1521,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         "Handle a single request."
         self._body_reader = False
         if not self.read_http_method():
-            return
+            raise socket.error()
         self.headers = {}
         self.read_http_headers()
         if "host" not in self.headers:
@@ -1649,11 +1655,15 @@ def file_read(fileobj, amount):
         return fileobj.read(amount)
 
 def file_write(fileobj, data):
+    tries = 100
     while True:
         try:
             fileobj.write(data)
         except IOError as e:
             if e.errno == errno.EINTR:
+                tries -= 1
+                if not tries:
+                    raise
                 continue
             raise
         break
