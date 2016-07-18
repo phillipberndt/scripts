@@ -2,6 +2,7 @@
 #
 
 # Install Inconsolata
+mkdir -p ~/.local/share/fonts/Inconsolata.otf
 [ -e ~/.local/share/fonts/Inconsolata.otf ] || wget http://www.levien.com/type/myfonts/Inconsolata.otf -O ~/.local/share/fonts/Inconsolata.otf
 gconftool -t string -s /desktop/gnome/interface/monospace_font_name "Inconsolata 11"
 dconf write /org/gnome/desktop/interface/monospace-font-name "'Inconsolata Medium 11'"

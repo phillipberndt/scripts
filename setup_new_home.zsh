@@ -60,6 +60,17 @@ if ! which virtualenv > /dev/null; then
 else
 	virtualenv --system-site-packages .
 fi
+
+if ! [ -e bin/pip ]; then
+	wget -O ez_setup.py https://bootstrap.pypa.io/ez_setup.py
+	python ez_setup.py
+	rm -f ez_setup.py
+
+	wget -O get-pip.py https://bootstrap.pypa.io/get-pip.py
+	python get-pip.py
+	rm -f get-pip.py
+fi
+
 cd ..
 
 # Initialize zsh
