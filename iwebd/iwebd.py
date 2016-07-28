@@ -863,6 +863,11 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         kwargs.update({
             "ip": self.client_address[0],
         })
+        if "status" in kwargs:
+            if kwargs["status"].startswith("2") or kwargs["status"].startswith("3"):
+                kwargs["status"] += " \033[1;32m✓"
+            else:
+                kwargs["status"] += " \033[1;31m✗"
         self.logger.log(lvl, msg, kwargs)
 
     def __init__(self, request, client_address, server, options={}):
