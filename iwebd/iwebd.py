@@ -103,6 +103,16 @@ try:
 except:
     has_bz2 = False
 
+try:
+    import ctypes
+    libc = ctypes.CDLL("", use_errno=True)
+    libc.sendfile.restype = ctypes.c_ssize_t
+    libc.sendfile.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_voidp, ctypes.c_size_t)
+    libc.strerror.restype = ctypes.c_char_p
+    has_ctypes = True
+except:
+    has_ctypes = False
+
 class SSLKey(object):
     "Tiny container for certificate information that can create self-signed temporary certificates on the fly"
     # TODO maybe add ca: Generate CA like cert below, but then leave the -x509 to create req and sign using `openssl x509 -req -in req -CA foo -CAkey bar -CAcreateserial -out crt`
@@ -1219,7 +1229,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         start = 0
         headers = additional_headers.copy()
         if size >= 0:
-            if size > 1024 and size < 1024000 and has_gzip and "accept-encoding" in self.headers and "gzip" in (", ".join(self.headers["accept-encoding"])).lower():
+            if size > 1024 and size < 102400 and has_gzip and "accept-encoding" in self.headers and "gzip" in (", ".join(self.headers["accept-encoding"])).lower():
                 # Compress small files on the fly
                 compressed = StringIO.StringIO()
                 with GzipWrapper(mode="w", fileobj=compressed) as out:
@@ -1684,6 +1694,24 @@ def fd_copy(source_file, target_file, length):
             if target_file:
                 file_write(target_file, data)
     else:
+        if has_ctypes:
+            try:
+                source_file.fileno()
+                if os.fstat(target_file.fileno()).st_mode & 0140000: # S_IFSOCK
+                    # Source file has an fd, target is a socket, and ctypes is available - use sendfile!
+                    original_length = length
+                    while length > 0:
+                        written = libc.sendfile(target_file.fileno(), source_file.fileno(), 0, length)
+                        if written <= 0:
+                            errno = ctypes.get_errno()
+                            if errno in (errno.EINVAL, errno.ENOSYS) and original_length == length:
+                                # sendfile() man-page tells us to fallback to a read/write loop
+                                break
+                            raise IOError(errno, "sendfile() failed [%s]" % errno.errorcode[errno])
+                        length -= written
+            except (io.UnsupportedOperation, AttributeError):
+                pass
+
         while length > 0:
             data = file_read(source_file, min(buffer, min(length, 10240)))
             if not data:
