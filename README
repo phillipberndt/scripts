@@ -55,7 +55,9 @@ Contents:
 * iwebd
 
   Monolithic instantaneous httpd and ftpd with support for everything you'd ever
-  need to quickly move a from b to c. Including webdav.
+  need to quickly move a from b to c. Including webdav, http/2, cgi, rewriting of
+  URLs, on-the-fly compression, and much more. Has no dependencies outside the
+  Python standard library.
 
 * libprivbind
 

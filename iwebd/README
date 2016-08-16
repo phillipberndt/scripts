@@ -20,6 +20,7 @@ iwebd's features include
    * Authentication (Basic/Digest)
    * webdav (with write access)
    * SSL
+   * http/2 over TLS if the SSL module supports ALPN
    * CGI
    * Range'd requests
    * Fancy directory listings with icons if you have pyGTK

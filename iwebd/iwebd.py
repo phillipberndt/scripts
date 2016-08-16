@@ -9,6 +9,7 @@ import StringIO
 import argparse
 import atexit
 import base64
+import collections
 import datetime
 import email
 import email.parser
@@ -115,7 +116,6 @@ except:
 
 class SSLKey(object):
     "Tiny container for certificate information that can create self-signed temporary certificates on the fly"
-    # TODO maybe add ca: Generate CA like cert below, but then leave the -x509 to create req and sign using `openssl x509 -req -in req -CA foo -CAkey bar -CAcreateserial -out crt`
     def __init__(self, cert=False, key=False):
         if (bool(cert) ^ bool(key)):
             raise ValueError("Either certificate or key not given")
@@ -123,9 +123,15 @@ class SSLKey(object):
             self.cert = cert
             self.key = key
         else:
-            self._certfile = tempfile.NamedTemporaryFile()
-            self._keyfile = tempfile.NamedTemporaryFile()
-            subprocess.call(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-out", self._certfile.name, "-keyout", self._keyfile.name], stdout=open("/dev/null", "w"), stderr=open("/dev/null", "w"))
+            self._certfile = tempfile.NamedTemporaryFile(suffix=".crt")
+            self._keyfile = tempfile.NamedTemporaryFile(suffix=".key")
+            subprocess.call(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-extensions", "usr_cert", "-out", self._certfile.name, "-keyout", self._keyfile.name], stdout=open("/dev/null", "w"), stderr=open("/dev/null", "w"))
+            mitmproxy_dir = os.path.expanduser("~/.mitmproxy/")
+            if os.path.isdir(mitmproxy_dir) and all(os.path.isfile(os.path.join(mitmproxy_dir, x)) for x in ("mitmproxy-ca-cert.pem", "mitmproxy-ca.pem")):
+                temp_cert = self._certfile
+                self._certfile = tempfile.NamedTemporaryFile(suffix=".crt")
+                subprocess.call(["openssl", "x509", "-set_serial", str(int(time.time())), "-in", temp_cert.name, "-CA", os.path.join(mitmproxy_dir, "mitmproxy-ca-cert.pem"), "-CAkey", os.path.join(mitmproxy_dir, "mitmproxy-ca.pem"), "-out", self._certfile.name], stdout=open("/dev/null", "w"), stderr=open("/dev/null", "w"))
+                logging.getLogger("main").info("SSL certificates will be signed with mitmproxy CA from ~/.mitmproxy")
             self.key = self._keyfile.name
             self.cert = self._certfile.name
             logging.getLogger("main").info("SSL certificates created in %s (key) and %s (cert)", self.key, self.cert)
@@ -140,6 +146,16 @@ class ReusableServer(SocketServer.ThreadingTCPServer):
             server_address = ("::0" if socket.has_ipv6 else "0.0.0.0", server_address[1])
         if ":" in server_address[0]:
             self.address_family = socket.AF_INET6
+        if "ssl_wrap" in self.__options:
+            context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            context.load_cert_chain(certfile=self.__options["ssl_wrap"].cert, keyfile=self.__options["ssl_wrap"].key)
+            if options["alpn_protocols"]:
+                try:
+                    context.set_alpn_protocols(options["alpn_protocols"])
+                except:
+                    # SSL implementation does not support ALPN
+                    pass
+            self.ssl_context = context
         SocketServer.ThreadingTCPServer.__init__(self, server_address, RequestHandlerClass)
 
     def finish_request(self, request, client_address):
@@ -149,7 +165,7 @@ class ReusableServer(SocketServer.ThreadingTCPServer):
     def get_request(self):
         sock, client_address = SocketServer.ThreadingTCPServer.get_request(self)
         if "ssl_wrap" in self.__options:
-            sock = ssl.wrap_socket(sock, self.__options["ssl_wrap"].key, self.__options["ssl_wrap"].cert, True, ssl_version = ssl.PROTOCOL_TLSv1 | ssl.PROTOCOL_SSLv23)
+            sock = self.ssl_context.wrap_socket(sock, server_side=True)
         return sock, client_address
 
     if has_pyprivbind:
@@ -869,6 +885,48 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         """
     }
 
+    HTTP2_HEADERS_STATIC_TABLE = (
+        (":authority",""), (":method","GET"), (":method","POST"), (":path","/"), (":path","/index.html"), (":scheme","http"), (":scheme","https"),
+        (":status","200"), (":status","204"), (":status","206"), (":status","304"), (":status","400"), (":status","404"), (":status","500"),
+        ("accept-charset",""), ("accept-encoding","gzip, deflate"), ("accept-language",""), ("accept-ranges",""), ("accept",""), ("access-control-allow-origin",""),
+        ("age",""), ("allow",""), ("authorization",""), ("cache-control",""), ("content-disposition",""), ("content-encoding",""), ("content-language",""),
+        ("content-length",""), ("content-location",""), ("content-range",""), ("content-type",""), ("cookie",""), ("date",""), ("etag",""), ("expect",""),
+        ("expires",""), ("from",""), ("host",""), ("if-match",""), ("if-modified-since",""), ("if-none-match",""), ("if-range",""), ("if-unmodified-since",""),
+        ("last-modified",""), ("link",""), ("location",""), ("max-forwards",""), ("proxy-authenticate",""), ("proxy-authorization",""), ("range",""),
+        ("referer",""), ("refresh",""), ("retry-after",""), ("server",""), ("set-cookie",""), ("strict-transport-security",""), ("transfer-encoding",""),
+        ("user-agent",""), ("vary",""), ("via",""), ("www-authenticate",""),
+    )
+
+    HTTP2_HEADERS_HUFFMAN_CODE = (
+        (0x1ff8, 13), (0x7fffd8, 23), (0xfffffe2, 28), (0xfffffe3, 28), (0xfffffe4, 28), (0xfffffe5, 28), (0xfffffe6, 28), (0xfffffe7, 28), (0xfffffe8, 28),
+        (0xffffea, 24), (0x3ffffffc, 30), (0xfffffe9, 28), (0xfffffea, 28), (0x3ffffffd, 30), (0xfffffeb, 28), (0xfffffec, 28), (0xfffffed, 28), (0xfffffee, 28),
+        (0xfffffef, 28), (0xffffff0, 28), (0xffffff1, 28), (0xffffff2, 28), (0x3ffffffe, 30), (0xffffff3, 28), (0xffffff4, 28), (0xffffff5, 28), (0xffffff6, 28),
+        (0xffffff7, 28), (0xffffff8, 28), (0xffffff9, 28), (0xffffffa, 28), (0xffffffb, 28), (0x14, 6), (0x3f8, 10), (0x3f9, 10), (0xffa, 12),
+        (0x1ff9, 13), (0x15, 6), (0xf8, 8), (0x7fa, 11), (0x3fa, 10), (0x3fb, 10), (0xf9, 8), (0x7fb, 11), (0xfa, 8), (0x16, 6), (0x17, 6), (0x18, 6), (0x0, 5),
+        (0x1, 5), (0x2, 5), (0x19, 6), (0x1a, 6), (0x1b, 6), (0x1c, 6), (0x1d, 6), (0x1e, 6), (0x1f, 6), (0x5c, 7), (0xfb, 8), (0x7ffc, 15), (0x20, 6), (0xffb, 12),
+        (0x3fc, 10), (0x1ffa, 13), (0x21, 6), (0x5d, 7), (0x5e, 7), (0x5f, 7), (0x60, 7), (0x61, 7), (0x62, 7), (0x63, 7), (0x64, 7), (0x65, 7), (0x66, 7),
+        (0x67, 7), (0x68, 7), (0x69, 7), (0x6a, 7), (0x6b, 7), (0x6c, 7), (0x6d, 7), (0x6e, 7), (0x6f, 7), (0x70, 7), (0x71, 7), (0x72, 7), (0xfc, 8), (0x73, 7),
+        (0xfd, 8), (0x1ffb, 13), (0x7fff0, 19), (0x1ffc, 13), (0x3ffc, 14), (0x22, 6), (0x7ffd, 15), (0x3, 5), (0x23, 6), (0x4, 5), (0x24, 6), (0x5, 5),
+        (0x25, 6), (0x26, 6), (0x27, 6), (0x6, 5), (0x74, 7), (0x75, 7), (0x28, 6), (0x29, 6), (0x2a, 6), (0x7, 5), (0x2b, 6), (0x76, 7), (0x2c, 6),
+        (0x8, 5), (0x9, 5), (0x2d, 6), (0x77, 7), (0x78, 7), (0x79, 7), (0x7a, 7), (0x7b, 7), (0x7ffe, 15), (0x7fc, 11), (0x3ffd, 14),
+        (0x1ffd, 13), (0xffffffc, 28), (0xfffe6, 20), (0x3fffd2, 22), (0xfffe7, 20), (0xfffe8, 20), (0x3fffd3, 22), (0x3fffd4, 22), (0x3fffd5, 22),
+        (0x7fffd9, 23), (0x3fffd6, 22), (0x7fffda, 23), (0x7fffdb, 23), (0x7fffdc, 23), (0x7fffdd, 23), (0x7fffde, 23), (0xffffeb, 24), (0x7fffdf, 23),
+        (0xffffec, 24), (0xffffed, 24), (0x3fffd7, 22), (0x7fffe0, 23), (0xffffee, 24), (0x7fffe1, 23), (0x7fffe2, 23), (0x7fffe3, 23), (0x7fffe4, 23),
+        (0x1fffdc, 21), (0x3fffd8, 22), (0x7fffe5, 23), (0x3fffd9, 22), (0x7fffe6, 23), (0x7fffe7, 23), (0xffffef, 24), (0x3fffda, 22), (0x1fffdd, 21),
+        (0xfffe9, 20), (0x3fffdb, 22), (0x3fffdc, 22), (0x7fffe8, 23), (0x7fffe9, 23), (0x1fffde, 21), (0x7fffea, 23), (0x3fffdd, 22), (0x3fffde, 22),
+        (0xfffff0, 24), (0x1fffdf, 21), (0x3fffdf, 22), (0x7fffeb, 23), (0x7fffec, 23), (0x1fffe0, 21), (0x1fffe1, 21), (0x3fffe0, 22), (0x1fffe2, 21),
+        (0x7fffed, 23), (0x3fffe1, 22), (0x7fffee, 23), (0x7fffef, 23), (0xfffea, 20), (0x3fffe2, 22), (0x3fffe3, 22), (0x3fffe4, 22), (0x7ffff0, 23),
+        (0x3fffe5, 22), (0x3fffe6, 22), (0x7ffff1, 23), (0x3ffffe0, 26), (0x3ffffe1, 26), (0xfffeb, 20), (0x7fff1, 19), (0x3fffe7, 22), (0x7ffff2, 23),
+        (0x3fffe8, 22), (0x1ffffec, 25), (0x3ffffe2, 26), (0x3ffffe3, 26), (0x3ffffe4, 26), (0x7ffffde, 27), (0x7ffffdf, 27), (0x3ffffe5, 26), (0xfffff1, 24),
+        (0x1ffffed, 25), (0x7fff2, 19), (0x1fffe3, 21), (0x3ffffe6, 26), (0x7ffffe0, 27), (0x7ffffe1, 27), (0x3ffffe7, 26), (0x7ffffe2, 27), (0xfffff2, 24),
+        (0x1fffe4, 21), (0x1fffe5, 21), (0x3ffffe8, 26), (0x3ffffe9, 26), (0xffffffd, 28), (0x7ffffe3, 27), (0x7ffffe4, 27), (0x7ffffe5, 27), (0xfffec, 20),
+        (0xfffff3, 24), (0xfffed, 20), (0x1fffe6, 21), (0x3fffe9, 22), (0x1fffe7, 21), (0x1fffe8, 21), (0x7ffff3, 23), (0x3fffea, 22), (0x3fffeb, 22),
+        (0x1ffffee, 25), (0x1ffffef, 25), (0xfffff4, 24), (0xfffff5, 24), (0x3ffffea, 26), (0x7ffff4, 23), (0x3ffffeb, 26), (0x7ffffe6, 27), (0x3ffffec, 26),
+        (0x3ffffed, 26), (0x7ffffe7, 27), (0x7ffffe8, 27), (0x7ffffe9, 27), (0x7ffffea, 27), (0x7ffffeb, 27), (0xffffffe, 28), (0x7ffffec, 27), (0x7ffffed, 27),
+        (0x7ffffee, 27), (0x7ffffef, 27), (0x7fffff0, 27), (0x3ffffee, 26), (0x3fffffff, 30),
+    )
+
+
     def log(self, lvl, msg, *args, **kwargs):
         kwargs.update({
             "ip": self.client_address[0],
@@ -880,7 +938,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 kwargs["status"] += " \033[1;31m✗"
         self.logger.log(lvl, msg, kwargs)
 
-    def __init__(self, request, client_address, server, options={}):
+    def __init__(self, request, client_address, server, options={}, use_gzip=has_gzip):
+        self.use_gzip = use_gzip
         self.headers = {}
         self.http_version = "HTTP/1.1"
         self.options = options
@@ -899,7 +958,12 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         try:
             line = None
             while not line:
-                line = self.rfile.readline()
+                try:
+                    line = self.rfile.readline()
+                except IOError as e:
+                    if e.errno == errno.EAGAIN:
+                        continue
+                    raise
                 if not line:
                     raise socket.error()
                 line = line.strip()
@@ -911,7 +975,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self.path = "/"
             self.request_uri = "/"
             self.http_version = "HTTP/1.1"
-            self.send_error("400 Bad request", force_close=True)
+            self.send_error("400 Bad request", force_close=True, details=traceback.format_exc())
             return False
         if self.http_version.lower() not in ("http/1.1", "http/1.0"):
             raise RuntimeError("Unknown HTTP version %s" % (self.http_version, ))
@@ -925,7 +989,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             line = self.rfile.readline()
             line = line[:-2 if len(line) > 1 and line[-2] == "\r" else -1]
             if not line:
-                return
+                break
             if line[0].isspace():
                 self.headers[previous_header][-1] += " %s" % (line.strip(), )
             previous_header, value = line.split(":", 1)
@@ -933,6 +997,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             if previous_header not in self.headers:
                 self.headers[previous_header] = []
             self.headers[previous_header].append(value.strip())
+        self.do_keep_alive = "connection" not in self.headers or self.headers["connection"][0].lower() != "close"
 
     def get_http_body_reader(self):
         "Return a file-like object that reads the body of a request. Returns a singleton for each request."
@@ -1036,7 +1101,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         # assume that, but sadly, Firefox is not among them.
         # (Doing so would allow us to use gzip for known content-length's, too)
         if "accept-encoding" in self.headers:
-            if has_gzip and "gzip" in ", ".join(self.headers["accept-encoding"]):
+            if self.use_gzip and "gzip" in ", ".join(self.headers["accept-encoding"]):
                 wrapper.append(lambda f: GzipWrapper(mode="w", fileobj=f))
                 headers["Content-Encoding"] = [ "gzip" ]
         headers["Transfer-Encoding"] = [ ", ".join(te_header) ]
@@ -1058,14 +1123,14 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 "SERVER_NAME": self.headers["host"][0] if "host" in self.headers else socket.gethostname(),
                 "GATEWAY_INTERFACE": "CGI/1.1",
                 "SERVER_PROTOCOL": self.http_version,
-                "SERVER_PORT": str(self.request.getsockname()[1]),
+                "SERVER_PORT": str(self.server.socket.getsockname()[1]),
                 "REQUEST_METHOD": self.method,
                 "QUERY_STRING": path.query,
                 "SCRIPT_NAME": path.path[:-len(self.path_info)-1] if self.path_info else path.path,
                 "PATH_INFO": self.path_info,
                 "REQUEST_URI": self.request_uri,
                 "PATH_TRANSLATED": os.path.abspath(self.mapped_path),
-                "REMOTE_ADDR": self.request.getpeername()[0],
+                "REMOTE_ADDR": self.client_address[0],
                 "CONTENT_TYPE": self.headers["content-type"][0] if "content-type" in self.headers else "",
                 "CONTENT_LENGTH": str(self.headers["content-length"][0]) if "content-length" in self.headers else "0",
         })
@@ -1119,6 +1184,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         if "content-length" in cgi_headers:
             self.send_header(status, headers)
             fd_copy(stdout, self.wfile, int(cgi_headers["content-length"][0]))
+        elif not self.do_keep_alive:
+            self.send_header("200 Ok", headers)
+            fd_copy(stdout, self.wfile, -1)
         else:
             with self.begin_chunked_reply(status, headers) as wfile:
                 fd_copy(stdout, wfile, -1)
@@ -1134,8 +1202,15 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             if "action" in query and query["action"][0] == "download":
                 archive_name = os.path.basename(path).replace('"', r'\"') or "download"
                 headers = { "Content-Type": "application/x-gtar", "Content-Disposition": "attachment; filename=\"%s.tar%s\"" % (archive_name, ".bz2" if has_bz2 else "") }
-                with self.begin_chunked_reply("200 Ok", headers) as wfile:
-                    outfile = tarfile.open(mode="w|bz2" if has_bz2 else "w", fileobj=wfile, format=tarfile.GNU_FORMAT)
+                if self.do_keep_alive:
+                    with self.begin_chunked_reply("200 Ok", headers) as wfile:
+                        outfile = tarfile.open(mode="w|bz2" if has_bz2 else "w", fileobj=wfile, format=tarfile.GNU_FORMAT)
+                        outfile.add(self.mapped_path, "")
+                        outfile.close()
+                else:
+                    self.send_header("200 Ok", headers)
+                    self.connection.setblocking(True) # Workaround for http/2 support
+                    outfile = tarfile.open(mode="w|bz2" if has_bz2 else "w", fileobj=self.wfile, format=tarfile.GNU_FORMAT)
                     outfile.add(self.mapped_path, "")
                     outfile.close()
                 return
@@ -1229,7 +1304,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         start = 0
         headers = additional_headers.copy()
         if size >= 0:
-            if size > 1024 and size < 102400 and has_gzip and "accept-encoding" in self.headers and "gzip" in (", ".join(self.headers["accept-encoding"])).lower():
+            if size > 1024 and size < 102400 and self.use_gzip and "accept-encoding" in self.headers and "gzip" in (", ".join(self.headers["accept-encoding"])).lower():
                 # Compress small files on the fly
                 compressed = StringIO.StringIO()
                 with GzipWrapper(mode="w", fileobj=compressed) as out:
@@ -1259,7 +1334,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
         if self.method.lower() == "head":
             self.send_header(status, headers)
-        elif size < 0:
+        elif size < 0 and self.do_keep_alive:
             with self.begin_chunked_reply(status, headers) as wfile:
                 fd_copy(file, wfile, size)
         else:
@@ -1534,6 +1609,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
     def handle_request(self):
         "Handle a single request."
+        self.request_uri = None
+        self.path = None
         self._body_reader = False
         if not self.read_http_method():
             raise socket.error()
@@ -1620,8 +1697,258 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         else:
             self.handle_request_for_file()
 
+    # http/2 implementation: {{{
+    def hpack_decode(self, data):
+        if not hasattr(self, "_http2_dynamic_header_table"):
+            self._http2_dynamic_header_table = []
+        headers = []
+
+        data = map(ord, data)
+
+        def _consume_int(prefix):
+            prefix_bits = (1<<prefix) - 1
+            if data[0] & prefix_bits == prefix_bits:
+                output = prefix_bits
+                data.pop(0)
+                bit_pos = 0
+                while data[0] >= 128:
+                    output += (data[0] & 127) << bit_pos
+                    bit_pos += 7
+                    data.pop(0)
+                output += (data[0] << bit_pos)
+                data.pop(0)
+            else:
+                output = data[0] & prefix_bits
+                data.pop(0)
+            return output
+
+        def _consume_str():
+            is_huffmann = data[0] & 128
+            str_len = _consume_int(7)
+            str_data = data[:str_len]
+            for i in range(str_len):
+                data.pop(0)
+            if not is_huffmann:
+                return "".join(map(chr, str_data))
+            prefix = 8
+            output = []
+            while str_data:
+                full_width_word_from_current = ((str_data[0] & ((1 << prefix) - 1)) << (32 - prefix)) + \
+                        ((str_data[1] if len(str_data) > 1 else 0) << (24 - prefix)) + \
+                        ((str_data[2] if len(str_data) > 2 else 0) << (16 - prefix)) + \
+                        ((str_data[3] if len(str_data) > 3 else 0) >> (8 - prefix))
+
+                for asc, (word, bit_length) in enumerate(self.HTTP2_HEADERS_HUFFMAN_CODE):
+                    if full_width_word_from_current >> (32 - bit_length) == word and (len(str_data) - 1) * 8 >= bit_length - prefix:
+                        if asc == 256:
+                            str_data = ""
+                            break
+                        output.append(chr(asc))
+                        if bit_length > prefix:
+                            str_data = str_data[1 + (bit_length - prefix) / 8:]
+                            prefix = 8 - (bit_length - prefix) % 8
+                        elif bit_length == prefix:
+                            str_data = str_data[1:]
+                            prefix = 8
+                        else:
+                            prefix -= bit_length
+                        break
+                else:
+                    break
+            return "".join(output)
+
+        def _get_table(header_id):
+            if header_id <= len(self.HTTP2_HEADERS_STATIC_TABLE):
+                return self.HTTP2_HEADERS_STATIC_TABLE[header_id - 1]
+            else:
+                return self._http2_dynamic_header_table[header_id - len(self.HTTP2_HEADERS_STATIC_TABLE) - 1]
+
+        while data:
+            if data[0] & 128:
+                # Indexed header
+                header_id = _consume_int(7)
+                headers.append(_get_table(header_id))
+            elif data[0] & 0b11000000 == 0b01000000:
+                # Literal field with incremental indexing
+                index = _consume_int(6)
+                if index > 0:
+                    name = _get_table(index)[0]
+                else:
+                    name = _consume_str()
+                value = _consume_str()
+                self._http2_dynamic_header_table.insert(0, (name, value))
+                headers.append((name, value))
+            elif data[0] & 0b11100000 == 0:
+                # Literal field (never indexed or unindexed)
+                index = _consume_int(4)
+                if index > 0:
+                    name = _get_table(index)[0]
+                else:
+                    name = _consume_str()
+                value = _consume_str()
+                headers.append((name, value))
+            elif data[0] & 0b11100000 == 0b00100000:
+                size = _consume_int(5)
+            else:
+                raise ValueError("Invalid data received as header: %s" % bin(data[0]))
+
+        return headers
+
+    def hpack_encode(self, headers):
+        def _encode_header(key, value):
+            key = key.lower()
+            def _encode_int(integer, prefix=8):
+                if integer < (1 << prefix) - 1:
+                    return chr(integer)
+                out = [ chr((1<<prefix) - 1) ]
+                integer -= ((1<<prefix) - 1)
+                while integer >= 128:
+                    out.append(chr(128 + (integer % 128)))
+                    integer /= 128
+                out.append(chr(integer))
+                return "".join(out)
+
+            def _encode_str_literal(st):
+                return _encode_int(len(st), 7) + st
+
+            return "".join(("\0", _encode_str_literal(key), _encode_str_literal(value)))
+
+        header_lines = headers.split("\r\n")
+        output = []
+
+        first_line = header_lines[0].split()
+        status_code = first_line[1]
+
+        output.append(_encode_header(":status", status_code))
+
+        for line in header_lines[1:]:
+            if ":" in line:
+                key, value = line.split(":", 1)
+                output.append(_encode_header(key.strip(), value.strip()))
+            else:
+                line = line.strip()
+                if line:
+                    output.append(_encode_header(key.strip(), line))
+
+        return "".join(output)
+
+
+    def http2_initiate(self, stream_id, stream):
+        sock1, sock2 = socket.socketpair()
+
+        def _thread(sock, client_address, server):
+            try:
+                HttpHandler(sock, client_address, server, options=self.options, use_gzip=False)
+            finally:
+                sock.close()
+        handler_thread = threading.Thread(target=_thread, args=(sock2, self.client_address, self.server))
+        handler_thread.start()
+        stream["handler_thread"] = handler_thread
+
+        def _communicate(stream_id, sock):
+            state = 0
+            str_buffer = ""
+            while True:
+                try:
+                    data = sock.recv(10240)
+                except IOError:
+                    break
+                if not data:
+                    break
+
+                if state == 0:
+                    str_buffer += data
+                    if "\r\n\r\n" not in str_buffer:
+                        continue
+                    state = 1
+                    headers, data = str_buffer.split("\r\n\r\n", 1)
+                    headers_send = self.hpack_encode(headers)
+                    length_hi = (len(headers_send) & 0xff0000) >> 16
+                    length_lo = len(headers_send) & 0xffff
+                    # HEADERS frame (type = 1), flags = 4 (END_HEADERS)
+                    self.wfile.write(struct.pack("!BHBBI", length_hi, length_lo, 1, 4, stream_id) + headers_send)
+
+                if state == 1 and data:
+                    length_hi = (len(data) & 0xff0000) >> 16
+                    length_lo = len(data) & 0xffff
+                    # DATA frame (type = 0), flags = 0
+                    self.wfile.write(struct.pack("!BHBBI", length_hi, length_lo, 0, 0, stream_id) + data)
+
+            # DATA frame (type = 0), flags = 1 (END_STREAM)
+            self.wfile.write(struct.pack("!BHBBI", 0, 0, 0, 1, stream_id))
+
+        communication_thread = threading.Thread(target=_communicate, args=(stream_id, sock1))
+        communication_thread.start()
+        stream["communication_thread"] = communication_thread
+
+        stream["handler_socket"] = sock1
+
+        hdict = dict(stream["headers"])
+        http11_headers =("%s %s HTTP/1.1\r\nConnection: close\r\nHost: %s\r\n%s\r\n\r\n" % (hdict[":method"], hdict[":path"], hdict[":authority"], "\r\n".join(("%s: %s" % (key, value) for key, value in stream["headers"] if not key.startswith(":")))))
+
+        sock1.send(http11_headers)
+
+    def handle_http2(self):
+        self.log(logging.DEBUG, "This is a http/2 request.")
+        self.wfile.write("\0\0\0\x04\0\0\0\0\0") # Empty SETTINGS frame
+        preface = self.rfile.read(24)
+        expected_preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+        assert preface == expected_preface
+
+        HTTP2_FRAME_TYPES = ( "DATA", "HEADERS", "PRIORITY", "RST_STREAM", "SETTINGS", "PUSH_PROMISE", "PING", "GOAWAY", "WINDOW_UPDATE", "CONTINUATION" )
+        HTTP2_ERROR_CODES = ( "NO_ERROR", "PROTOCOL_ERROR", "INTERNAL_ERROR", "FLOW_CONTROL_ERROR", "SETTINGS_TIMEOUT", "STREAM_CLOSED", "FRAME_SIZE_ERROR",
+                              "REFUSED_STREAM", "CANCEL", "COMPRESSION_ERROR", "CONNECT_ERROR", "ENHANCE_YOUR_CALM", "INADEQUATE_SECURITY", "HTTP_1_1_REQUIRED" )
+
+        streams = collections.defaultdict(lambda: { "headers": [] })
+
+        while not self.rfile.closed:
+            try:
+                frame_length_hi, frame_length_lo, frame_type, frame_flags, frame_sid = struct.unpack("!BHBBI", self.rfile.read(9))
+            except:
+                break
+            frame_length = frame_length_lo + (frame_length_hi << 16)
+            data = self.rfile.read(frame_length)
+
+            if frame_type == 0: # DATA
+                # data contains 1 byte containing how many padding bytes are at the end of the data
+                # flags: 1 -> end_stream; 8 -> padded (padding byte is only there in this case!)
+                if frame_flags & 8:
+                    data = data[1:-struct.unpack("B", data[0])]
+                streams[frame_sid]["handler_socket"].send(data)
+                if frame_flags & 1:
+                    streams[frame_sid]["handler_socket"].shutdown(socket.SHUT_WR)
+            elif frame_type in (1, 9): # HEADERS, CONTINUATION
+                # header block: RFC 7541
+                # https://tools.ietf.org/html/rfc7541#page-6
+                #
+                if frame_flags & 8:
+                    data = data[1:-struct.unpack("B", data[0])]
+                data = data[4 + (1 if frame_flags & 0x20 else 0):] # Skip stream priority and weight
+                streams[frame_sid]["headers"] += self.hpack_decode(data)
+                if frame_flags & 4:
+                    self.http2_initiate(frame_sid, streams[frame_sid])
+                if frame_flags & 1:
+                    streams[frame_sid]["handler_socket"].shutdown(socket.SHUT_WR)
+            elif frame_type == 3: # RST_STREAM
+                if frame_sid in streams:
+                    if "handler_socket" in streams[frame_sid]:
+                        streams[frame_sid]["handler_socket"].shutdown(socket.SHUT_RDWR)
+                    del streams[frame_sid]
+            elif frame_type == 4: # SETTINGS
+                # TODO Actually handle settings
+                if not frame_flags & 1:
+                    self.wfile.write("\0\0\0\x04\1\0\0\0\0") # Empty SETTINGS frame with ACK flag set
+            elif frame_type == 6: # PING
+                self.wfile.write(struct.pack("!BHBBI", frame_length_hi, frame_length_lo, 6, 1, frame_sid) + data) # PONG, same frame with ACK flag set
+            else:
+                self.log(logging.DEBUG, "Ignoring http/2 frame: Length %(len)d, type %(type)s, flags %(flags)d, stream id %(sid)d", len=frame_length,
+                         type=HTTP2_FRAME_TYPES[frame_type] if frame_type < len(HTTP2_FRAME_TYPES) else str(frame_type), flags=frame_flags, sid=frame_sid)
+    # }}}
+
     def handle(self):
         self.log(logging.DEBUG, "Accepted connection")
+        if hasattr(self.connection, "selected_alpn_protocol") and self.connection.selected_alpn_protocol() == "h2":
+            return self.handle_http2()
         while not self.rfile.closed:
             self.do_keep_alive = True
             try:
@@ -1675,6 +2002,8 @@ def file_write(fileobj, data):
         try:
             fileobj.write(data)
         except IOError as e:
+            if e.errno == errno.EAGAIN:
+                continue
             if e.errno == errno.EINTR:
                 tries -= 1
                 if not tries:
@@ -1942,7 +2271,7 @@ def main():
     parser.add_argument("-f", nargs="?", default=False, type=partial(hostportpair, "ftpd"), help="Run ftpd", metavar="port")
     parser.add_argument("-h", nargs="?", default=False, type=partial(hostportpair, "httpd"), help="Run httpd", metavar="port")
     if has_ssl:
-        parser.add_argument("-H", nargs="?", default=False, type=partial(hostportpair, "httpsd"), help="Run httpsd", metavar="port")
+        parser.add_argument("-H", nargs="?", default=False, type=partial(hostportpair, "httpsd"), help="Run httpsd / http2d", metavar="port")
     parser.add_argument("-d", action="store_true", help="Activate webdav in httpd")
     parser.add_argument("-w", action="store_true", help="Activate write access")
     parser.add_argument("-c", action="store_true", help="Allow CGI in httpd")
@@ -1988,6 +2317,7 @@ def main():
         "pass": password,
         "allow_cgi": options["c"],
         "cgi_handlers": cgi_handlers,
+        "alpn_protocols": None,
     }
 
     script_file_name = os.path.abspath(__file__)
@@ -2019,7 +2349,7 @@ def main():
     if "H" in options and options["H"] is not False:
         if not has_ssl:
             raise ValueError("No SSL available.")
-        http_variants.append(("HTTPS", {"ssl_wrap": ssl_key}, options["H"] or ("", default_port("httpsd")), "https", "webdavs"))
+        http_variants.append(("HTTPS", {"ssl_wrap": ssl_key, "alpn_protocols": ["h2", "http/1.1"]}, options["H"] or ("", default_port("httpsd")), "https", "webdavs"))
 
     for name, additional_options, port, avahi_name_http, avahi_name_webdav in http_variants:
         actual_options = server_options.copy()
