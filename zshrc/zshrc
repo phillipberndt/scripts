@@ -220,6 +220,6 @@ if ! [ $HOME/.zsh/.todo_zsh_timestamp(ms-$(grep -Eo "^[0-9]+" /proc/uptime)) ]; 
 fi
 
 # Execute other scripts
-for SCRIPT in $HOME/.zsh/scripts/*(.x); do
+for SCRIPT in $HOME/.zsh/scripts/*(.x,@x); do
 	source $SCRIPT
 done
