@@ -81,6 +81,7 @@ mkdir .zsh
 cd .zsh
 ln -s ../.local/_scripts/zshrc/{site,zshrc,zgen} .
 mkdir scripts
+ln -s ../.local/_scripts/zshrc/scripts/* scripts/
 cd ..
 ln -s .zsh/zshrc .zshrc
 source .zshrc

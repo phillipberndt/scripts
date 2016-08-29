@@ -202,6 +202,12 @@ fi
 
 # Set the $DISPLAY variable if it is not set and the user has an open session
 if [ -z "$DISPLAY" ]; then
+	if which loginctl &>/dev/null; then
+		LOGINCTL_SESSION=$(loginctl show-user $USER -p Display | cut -d= -f2)
+		if [ -n "$LOGINCTL_SESSION" ]; then
+			export DISPLAY=$(loginctl show-session $LOGINCTL_SESSION -p Display | cut -d= -f2)
+		fi
+	fi
 	if which ck-list-sessions &>/dev/null; then
 		eval `ck-list-sessions | awk "/^Session/{right=0} /unix-user = '$UID'/{right=1} /x11-display = '(.+)'/{ if(right == 1) printf(\"DISPLAY=%s\n\", \\\$3); }";`
 	fi
