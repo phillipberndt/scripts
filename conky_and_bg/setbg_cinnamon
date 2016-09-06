@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# vim:fileencoding=utf8
 #
 # Choose as many images from the ~/.bg folder as there are screens, properly
 # scale them to fit them and set them as the cinnamon background image.
@@ -50,6 +51,10 @@ def liquid_rescale(img, target_size):
 
 nice()
 
+cachedir = os.path.expanduser("~/.cache/setbg_cinnamon/")
+if not os.path.isdir(cachedir):
+    os.mkdir(cachedir)
+
 imgdir = os.path.expanduser("~/.bg/")
 randr = os.popen("xrandr -q").read()
 screens = [ [ int(x) for x in y ] for y in re.findall(" connected.* ([0-9]+)x([0-9]+)\+([0-9]+)", randr) ]
@@ -64,7 +69,8 @@ draw = PIL.ImageDraw.Draw(output)
 
 for no in range(len(screens)):
 	screen = screens[no]
-	image = PIL.Image.open(os.path.join(imgdir, images[no]))
+        image_file = os.path.join(imgdir, images[no])
+	image = PIL.Image.open(image_file)
 	output_size = list(image.size)
 
 	if output_size[0] > screen[0] and output_size[1] > screen[1]:
@@ -75,13 +81,24 @@ for no in range(len(screens)):
 			output_size[0] = output_size[0] * screen[1] / output_size[1];
 			output_size[1] = screen[1]
 
-        if HAS_IMAGICK and (output_size[0] < screen[0] - 100 or output_size[1] < screen[1] - 100):
+        if HAS_IMAGICK and (screen[0] - 500 < output_size[0] < screen[0] - 50 or screen[1] < 500 < output_size[1] < screen[1] - 100):
+            print "Screen #%d: %s %dx%d → %dx%d (Liquid scale)" % (no, images[no], image.size[0], image.size[1], screen[0], screen[1])
             if image.size[0] > screen[0] and image.size[1] > screen[1]:
                 multiplier = max((screen[0] * 1. / image.size[0], screen[1] * 1. / image.size[1]))
                 image = image.resize(map(int, (screen[0] * multiplier, screen[1] * multiplier)))
-            image = liquid_rescale(image, screen[:2])
+
+            cache_file = os.path.join(cachedir, "".join(("liquid_rescale", image_file.replace("/", "_").replace(" ", "_"), "_".join(map(str, screen[:2])), os.path.splitext(image_file)[-1])))
+            if os.path.isfile(cache_file):
+                image = PIL.Image.open(open(image_file))
+            else:
+                image = liquid_rescale(image, screen[:2])
+                if cache_file.endswith("jpg"):
+                    image.save(cache_file, quality=80)
+                else:
+                    image.save(cache_file)
             output_size = screen[:2]
         else:
+            print "Screen #%d: %s %dx%d → %dx%d" % (no, images[no], image.size[0], image.size[1], output_size[0], output_size[1])
             image = image.resize(output_size)
 	output_top = (screen[1] - output_size[1]) / 2
 	output_left = (screen[0] - output_size[0]) / 2
