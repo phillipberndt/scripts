@@ -1,0 +1,81 @@
+#!/usr/bin/env python
+import random
+import sys
+
+names = "black red green brown blue magenta cyan white".split()
+
+for i in range(30, 38):
+	j = i + 10
+        if i < 10:
+            print "",
+	print "\\033[%dm   \033[%dm gives %-10s           \033[0m" % (i, i, names[i-30]),
+	print "\\033[%dm   \033[%dm gives %-10s      \033[0m     " % (j, j, names[i-30] + " bg"),
+	print "\\033[2;%dm   \033[2;%dm gives %-10s           \033[0m" % (i, i, names[i-30]),
+	print "\\033[2;%dm   \033[2;%dm gives %-10s      \033[0m" % (j, j, names[i-30] + " bg")
+print
+
+for i in range(30, 38):
+	j = i + 10
+        if i < 10:
+            print "",
+	print "\\033[7;%dm \033[7;%dm gives %-10s      \033[0m     " % (i, i, names[i-30]),
+	print "\\033[7;%dm \033[7;%dm gives %-10s      \033[0m     " % (j, j, names[i-30] + " bg"),
+	print "\\033[7;2;%dm \033[7;2;%dm gives %-10s      \033[0m     " % (i, i, names[i-30]),
+	print "\\033[7;2;%dm \033[7;2;%dm gives %-10s      \033[0m" % (j, j, names[i-30] + " bg")
+
+print
+for i in [1,2,4,5]:
+        if i < 10:
+            print "",
+	print "\\033[%dm   \033[%dm gives this           \033[0m" % (i, i)
+
+if len(sys.argv) == 1:
+    print "Append 256 for more"
+else:
+    if sys.argv[1] == "256":
+        print
+        for i in range(0,256,5):
+            line = ""
+            for j in range(i, i+5):
+                line += "\\033[38;5;%03dm \033[38;5;%03dm gives this         \033[0m   " % (i, i)
+            print line
+    def r(stri):
+        o = ""
+        for c in stri:
+            o += "\033[38;2;%d;%d;%dm%s\033[0m" % (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), c)
+        return o
+
+    print
+    print "or use \\033[38;2;R;G;Bm:          ", r("like this :)") + "\033[0m"
+    print "Supported colors by this mode: ",
+
+    line = ["   "]
+    for hue in range(0, 360, 3):
+        saturation = 1.
+        value = 1
+
+        h = hue//60
+        f = hue/60. - h
+
+        p = value * (1 - saturation)
+        q = value * (1 - saturation * f)
+        t = value * (1 - saturation * (1 - f))
+
+        if h in (0, 6):
+            r, g, b = value, t, p
+        elif h == 1:
+            r, g, b = q, value, p
+        elif h == 2:
+            r, g, b = p, value, t
+        elif h == 3:
+            r, g, b = p, q, value
+        elif h == 4:
+            r, g, b = t, p, value
+        elif h == 5:
+            r, g, b = value, p, q
+
+        line.append("\033[38;2;%d;%d;%dmW\033[0m" % (r*255, g*255, b*255))
+    print "".join(line)
+
+print
+print
