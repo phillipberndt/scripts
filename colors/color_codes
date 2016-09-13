@@ -24,7 +24,7 @@ for i in range(30, 38):
 	print "\\033[7;2;%dm \033[7;2;%dm gives %-10s      \033[0m" % (j, j, names[i-30] + " bg")
 
 print
-for i in [1,2,4,5]:
+for i in [1,2,3,4,5]:
         if i < 10:
             print "",
 	print "\\033[%dm   \033[%dm gives this           \033[0m" % (i, i)
