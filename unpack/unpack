@@ -17,6 +17,8 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 04.10.2016
+#    Add zstandard support
 #  - 16.12.2014
 #    Fixed RPM support (Correctly skip header, LZMA archive through recursive unpack invocation)
 #  - 27.02.2014
@@ -245,6 +247,7 @@ TBZFile = defaultTypeGenerator(r"\.(tbz|tar\.bz2?)", "application/x-tar.+applica
 TGZFile = defaultTypeGenerator(r"\.(tgz|tar\.g?z)", "application/x-tar.+application/x-gzip", "tar", "tar xz `echo $PARMAS` -C \"$DEST\" -f \"$FILE\"")
 TGZFile = defaultTypeGenerator(r"\.tar\.xz", "application/x-tar.+application/x-xz", "tar", "tar x `echo $PARAMS` --lzma -C \"$DEST\" -f \"$FILE\"")
 TARFile = defaultTypeGenerator(r"\.tar", "application/x-tar", "tar", "tar x `echo $PARAMS` -C \"$DEST\" -f \"$FILE\"")
+TARFile = defaultTypeGenerator(r"\.tar\.zst", "", "tar zstdcat", "zstdcat \"$FILE\" | tar x `echo $PARAMS` -C \"$DEST\"")
 CABFile = defaultTypeGenerator(r"\.cab", "^$", "cabextract", "cabextract `echo $PARAMS` -d \"$DEST\" \"$FILE\"")
 LHAFile = defaultTypeGenerator(r"\.lha", "application/x-lha", "lha", "lha x `echo $PARAMS` -w=\"$DEST\" \"$FILE\"")
 ARJFile = defaultTypeGenerator(r"\.arj", "application/x-arj", "arj", "arj x `echo $PARAMS` \"$FILE\" \"$DEST\"")
@@ -478,9 +481,6 @@ class SquashFSFile(filetype): # {{{
 			pass
 		return False
 	@classmethod
-	def mimeTypeMatches(cls, type):
-		return False
-	@classmethod
 	def toolsAvailable(cls):
 		if not os.system("which unsquashfs >/dev/null") == 0:
 			sout("warn", "You need unsquashfs to decompress this file")
@@ -493,7 +493,28 @@ class SquashFSFile(filetype): # {{{
 			params = ""
 		return os.system("unsquashfs %s -f -d %s %s" % (params, se(destination), se(cls.file))) == 0
 # }}}
+class ZStandard(filetype):# {{{
+	TYPE_DEF = r"\.zst"
+	TYPE_MIME_DEF = ""
+	TYPE_REQUIRES = "zstd"
 
+	@classmethod
+	def canHandle(cls, file):
+		try:
+			if open(file).read(4) == "\x28\xB5\x2F\xFD":
+				return True
+		except:
+			pass
+		return False
+
+	def unpack(cls, destination, **parameters):
+		if "parameters" in parameters:
+			params = parameters["parameters"]
+		else:
+			params = ""
+		destination = os.path.join(destination, os.path.splitext(cls.file)[0])
+		return os.system("zstd %s -d -o %s %s" % (params, se(destination), se(cls.file))) == 0
+# }}}
 
 # libarchive support {{{
 libarchive = False
