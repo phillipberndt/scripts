@@ -112,6 +112,14 @@ Contents:
   You'll need to use gpg-agent for this to work. No support for
   passphrase-input-windows
 
+* paxel
+
+  My attempt on rewriting axel in Python using cURL. The idea was that cURL
+  probably provides more robust downloads, and that a scripted variant could
+  eventually be extended to support stuff like dynamic addition/removal of
+  downloader threads. Currently, the only benefit this has over axel is that it
+  maintains a state file which allows to resume interrupted downloads.
+
 * pskill
 
   A interactive pkill variant. Sends SIGKILL automatically if SIGTERM fails,
