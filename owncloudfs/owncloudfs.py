@@ -98,7 +98,9 @@ class OwncloudProxy(object): # {{{
         pass
 
     REQUEST_TOKEN_REGEX  = re.compile('name="requesttoken"\s+value="([^"]+)"')
-    SHARE_URL            = re.compile("^(?P<base>.+)public.php\?.+t=(?P<token>[^&]+)(?:&|$)")
+    SHARE_URL            = [ re.compile("^(?P<base>.+)public.php\?.+t=(?P<token>[^&]+)(?:&|$)"),
+                             re.compile("^(?P<base>.+)index.php/s/(?P<token>[^&]+)(?:&|$)"),
+                           ]
 
     LIST_SERVICE_PATH    = "index.php/apps/files_sharing/ajax/list.php"
     UPLOAD_SERVICE_PATH  = "index.php/apps/files/ajax/upload.php"
@@ -121,8 +123,12 @@ class OwncloudProxy(object): # {{{
 
     @url.setter
     def url(self, url):
-        url_match = self.SHARE_URL.match(url)
-        if not url_match:
+        for revision, share_url in enumerate(self.SHARE_URL):
+            url_match = share_url.match(url)
+            if url_match:
+                self.revision = revision
+                break
+        else:
             raise self.OwncloudProxyException("This program is intended to be used with public owncloud shares")
         self._url = url
         self._url_base = url_match.group("base")
@@ -163,18 +169,21 @@ class OwncloudProxy(object): # {{{
             request = self.new_request("%s%s?%s" % (self._url_base, self.LIST_SERVICE_PATH, urllib.urlencode({ "t": self._share_token, "dir": path, "sort": "name", "sortdirection": "asc" })))
             response = json.load(urllib2.urlopen(request))
         for entry in response[u"data"][u"files"]:
-             mtime = time.mktime(datetime.datetime.strptime(entry[u"date"], "%B %d, %Y %H:%M").timetuple())
-             name = entry[u"name"]
-             size = int(entry[u"size"])
-             is_dir = entry[u"type"] == u"dir"
-             yield name, {
-                 "st_mode": 0100644 if not is_dir else 040755,
-                 "st_mtime": mtime,
-                 "st_ctime": mtime,
-                 "st_uid": os.getuid(),
-                 "st_gid": os.getgid(),
-                 "st_size": size,
-             }
+            try:
+                mtime = time.mktime(datetime.datetime.strptime(entry[u"date"], "%B %d, %Y %H:%M").timetuple())
+            except ValueError:
+                mtime = time.mktime(datetime.datetime.strptime(entry[u"date"].replace(" GMT+0", ""), "%B %d, %Y at %H:%M:%S %p").timetuple())
+            name = entry[u"name"]
+            size = int(entry[u"size"])
+            is_dir = entry[u"type"] == u"dir"
+            yield name, {
+                "st_mode": 0100644 if not is_dir else 040755,
+                "st_mtime": mtime,
+                "st_ctime": mtime,
+                "st_uid": os.getuid(),
+                "st_gid": os.getgid(),
+                "st_size": size,
+            }
 
     def get_file(self, path):
         """Return an opened file for reading
@@ -182,12 +191,18 @@ class OwncloudProxy(object): # {{{
             TODO Add support for Range requests
         """
         directory, filename = os.path.split(path)
-        request = self.new_request("%s%s?%s&download" % (self._url_base, self.PUBLIC_SERVICE_PATH, urllib.urlencode({ "service": "files", "t": self._share_token, "path": directory, "files": filename })))
+        if self.revision == 0:
+            request = self.new_request("%s%s?%s&download" % (self._url_base, self.PUBLIC_SERVICE_PATH, urllib.urlencode({ "service": "files", "t": self._share_token, "path": directory, "files": filename })))
+        else:
+            request = self.new_request("%s/index.php/s/%s/download?%s" % (self._url_base, self._share_token, urllib.urlencode({ "path": directory, "files": filename })))
         response = urllib2.urlopen(request)
         if response.info().getheader("Set-Cookie") is not None:
             # Login token expired
             self.obtain_login_token()
-            request = self.new_request("%s%s?%s&download" % (self._url_base, self.PUBLIC_SERVICE_PATH, urllib.urlencode({ "service": "files", "t": self._share_token, "path": directory, "files": filename })))
+            if self.revision == 0:
+                request = self.new_request("%s%s?%s&download" % (self._url_base, self.PUBLIC_SERVICE_PATH, urllib.urlencode({ "service": "files", "t": self._share_token, "path": directory, "files": filename })))
+            else:
+                request = self.new_request("%s/index.php/s/%s/download?%s" % (self._url_base, self._share_token, urllib.urlencode({ "path": directory, "files": filename })))
             response = urllib2.urlopen(request)
         return response
 
