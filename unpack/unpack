@@ -17,6 +17,8 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 06.10.2016
+#    Support paxel in addition to axel
 #  - 04.10.2016
 #    Add zstandard support
 #  - 16.12.2014
@@ -245,7 +247,7 @@ RARFile = defaultTypeGenerator(r"\.rar", "application/x-rar", "unrar", "unrar x 
 TARLZMAFile = defaultTypeGenerator(r"\.tar\.lzma", "application/x-tar.+application/x-lzma", "tar", "tar x $PARAMS --lzma -C \"$DEST\" -f \"$FILE\"")
 TBZFile = defaultTypeGenerator(r"\.(tbz|tar\.bz2?)", "application/x-tar.+application/x-bzip2", "tar", "tar xj `echo $PARAMS` -C \"$DEST\" -f \"$FILE\"")
 TGZFile = defaultTypeGenerator(r"\.(tgz|tar\.g?z)", "application/x-tar.+application/x-gzip", "tar", "tar xz `echo $PARMAS` -C \"$DEST\" -f \"$FILE\"")
-TGZFile = defaultTypeGenerator(r"\.tar\.xz", "application/x-tar.+application/x-xz", "tar", "tar x `echo $PARAMS` --lzma -C \"$DEST\" -f \"$FILE\"")
+TXZFile = defaultTypeGenerator(r"\.tar\.xz", "application/x-tar.+application/x-xz", "tar", "tar x `echo $PARAMS` --lzma -C \"$DEST\" -f \"$FILE\"")
 TARFile = defaultTypeGenerator(r"\.tar", "application/x-tar", "tar", "tar x `echo $PARAMS` -C \"$DEST\" -f \"$FILE\"")
 TARFile = defaultTypeGenerator(r"\.tar\.zst", "", "tar zstdcat", "zstdcat \"$FILE\" | tar x `echo $PARAMS` -C \"$DEST\"")
 CABFile = defaultTypeGenerator(r"\.cab", "^$", "cabextract", "cabextract `echo $PARAMS` -d \"$DEST\" \"$FILE\"")
@@ -705,7 +707,7 @@ def downloadHook(fkt):
 @downloadHook
 def hookURLDownload(file):
 	"""
-		Download URLs using axel/curl/wget or python urllib
+		Download URLs using (p)axel/curl/wget or python urllib
 	"""
 	if re.match(r"^[a-zA-Z]+:\/\/.+", file):
 		sout("good", "URL detected. Downloading")
@@ -716,7 +718,10 @@ def hookURLDownload(file):
 				counter += 1
 			targetFile = "%d-%s" % (counter, targetFile)
 		success = False
-		if os.system("which axel >/dev/null") == 0:
+		if os.system("which paxel >/dev/null") == 0:
+			paxelRet = os.system("paxel -o %s %s" % (se(targetFile), se(file)))
+			success = paxelRet == 0
+		elif os.system("which axel >/dev/null") == 0:
 			axelRet = os.system("axel -a -o %s %s" % (se(targetFile), se(file)))
 			# Axel sometimes fails when there are too many redirects
 			if axelRet == 2:
