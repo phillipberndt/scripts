@@ -464,12 +464,6 @@ def progress_callback(state, request_range, download, download_total, download_d
 
         update_progress(state)
 
-        # If this part is done, remove it from the list.
-        if download_total == download_done:
-            # dl_state["cancel_status"] = "deliberate"
-            del state["parts"][download]
-            return -2
-
     except KeyboardInterrupt:
         state["canceled"] = True
         return -2
@@ -503,6 +497,7 @@ def gen_curl(state, request_range=None):
     download.setopt(pycurl.NOPROGRESS, False)
     download.setopt(pycurl.LOW_SPEED_LIMIT, 1024)
     download.setopt(pycurl.LOW_SPEED_TIME, 30)
+    download.setopt(pycurl.MAXREDIRS, 50)
 
     file_pos = 0
     range_upper = None
@@ -604,7 +599,8 @@ def download(url, target_file=None):
         flush_buffer(state, download)
 
     update_progress(state)
-    state["fd"].close()
+    if "fd" in state:
+        state["fd"].close()
     state.sync()
 
     fail_state = False
