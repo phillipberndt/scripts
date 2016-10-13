@@ -203,6 +203,21 @@ def header_callback(state, request_range, download, data):
 
                 dl_state["range_total"] = int(range_total)
 
+            if "content-disposition" in data:
+                fn_pos = data.find("filename=")
+                if fn_pos >= 0:
+                    file_name = data[fn_pos + 9:]
+                    if file_name[0] == '"':
+                        file_name = file_name[1:]
+                        file_name = file_name[:file_name.find('"')]
+                    elif file_name[0] == "'":
+                        file_name = file_name[1:]
+                        file_name = file_name[:file_name.find("'")]
+                    else:
+                        if ';' in file_name:
+                            file_name = file_name[:file_name.find(";")]
+                    state["disposition_name"] = file_name
+
 
 class StateShelf(object):
     "A shelf that maintains some fixed keys in a local dict instead of in the shelf."
@@ -284,9 +299,12 @@ def create_output_file(state):
     if state["target_file"]:
         file_name = state["target_file"]
     else:
-        file_name = os.path.basename(state["url"])
-        if "?" in file_name:
-            file_name = file_name[:file_name.find("?")]
+        if "disposition_name" in state:
+            file_name = state["disposition_name"]
+        else:
+            file_name = os.path.basename(state["url"])
+            if "?" in file_name:
+                file_name = file_name[:file_name.find("?")]
         if not file_name:
             file_name = "index"
         if os.access(file_name, os.R_OK):
