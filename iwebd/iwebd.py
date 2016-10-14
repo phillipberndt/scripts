@@ -42,6 +42,7 @@ import uuid
 from wsgiref.handlers import format_date_time
 from functools import partial
 
+# TODO Reverse shell / telnet server / proxy server
 # TODO ngrok support (?!)
 # TODO htaccess/mod_rewrite support for httpd
 
