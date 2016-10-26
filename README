@@ -33,10 +33,15 @@ Contents:
   the screen. Where conky resides. For X11 setups without RGBA extension, where
   conky can not do this by itself.
 
+* emoji
+
+  A simple pygtk script that displays a list of all currently defined Unicode
+  emoji and lets the user select one, which is then copied into the clipboard.
+
 * gdo
 
   find(1)-like utility with support for
-   
+
       find -regextype pcre -iregex "$1" -exec "$2" \;
 
   but (a) this really works with pcre, (b) more comfortable:
