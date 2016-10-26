@@ -9,11 +9,15 @@ import os
 import re
 import requests
 import shelve
+import time
 
 import gi
 gi.require_version("Gtk", "3.0")
 
 from gi.repository import Gtk, GObject, GdkPixbuf, Gdk
+
+import Xlib.display
+import ctypes
 
 EMOJI_LIST_URL    = "http://www.unicode.org/emoji/charts/full-emoji-list.html"
 EMOJI_LIST_REGEXP = u"(?s)<tr>(?:(?!</tr>|<img).)+<img(?:(?!</tr>|<img).)+<img alt='(?P<codepoint>[^']+)'[^>]+src='(?P<image>data:image/[^']+)'[^>]*>(?:(?!</tr>).)*<td class='name'>(?P<name>[^<]+)"
@@ -37,6 +41,51 @@ def get_emoji_cache():
         emoji_cache.sync()
 
     return emoji_cache
+
+_lib_cache = [None, None]
+def xlib_get_display():
+    if _lib_cache[0] is None:
+        _lib_cache[0] = Xlib.display.Display()
+    return _lib_cache[0]
+
+def xlib_unicode_cp_to_keysym(codepoint):
+    "Return keysym for Unicode codepoint. Worst hack ever."
+    if _lib_cache[1] is None:
+        _lib_cache[1] = ctypes.CDLL("libX11.so")
+    return _lib_cache[1].XStringToKeysym("U%08X" % codepoint)
+
+def xlib_get_active_window():
+    "Return the Xlib window which has the input focus"
+    return xlib_get_display().get_input_focus().focus
+
+def xlib_send_string(text, window=None):
+    """
+        Send a string to a window by remapping the keyboard. Slow, but works
+        with all Unicode characters.
+    """
+    if type(text) is not unicode:
+        text = text.decode("utf8")
+    if not window:
+        window = xlib_get_active_window()
+    display = xlib_get_display()
+
+    original_mapping = display.get_keyboard_mapping(254, 1)
+
+    try:
+        for character in text:
+            display.change_keyboard_mapping(254, [ [xlib_unicode_cp_to_keysym(ord(character))] ])
+
+            display.sync()
+            for m_type in (Xlib.protocol.event.KeyPress, Xlib.protocol.event.KeyRelease):
+                    ev = m_type(time=0, child=0, state=0, root=window.query_tree().root, window=window, same_screen=1, \
+                            root_x=0, root_y=0, event_x=0, event_y=1, detail=254)
+                    window.send_event(ev)
+                    display.sync()
+            time.sleep(0.05)
+
+            pass
+    finally:
+        display.change_keyboard_mapping(254, original_mapping)
 
 def create_window():
     """
@@ -64,9 +113,11 @@ def create_window():
             except:
                 return False
 
-            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-            clipboard.set_text(codepoint, -1)
-            clipboard.store()
+            #clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            #clipboard.set_text(codepoint, -1)
+            #clipboard.store()
+
+            window.retval = codepoint.decode("utf8")
 
             GObject.idle_add(Gtk.main_quit, None)
 
@@ -118,8 +169,15 @@ def create_window():
 
     return window
 
-if __name__ == "__main__":
+def get_emoji():
+    "Querys the user for an emoji"
     window = create_window()
     window.show_all()
     Gtk.main()
+    return window.retval
 
+
+if __name__ == "__main__":
+    focus_widget = xlib_get_active_window()
+    emoji = get_emoji()
+    xlib_send_string(emoji, focus_widget)
