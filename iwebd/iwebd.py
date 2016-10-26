@@ -22,6 +22,7 @@ import locale
 import logging
 import mimetypes
 import os
+import pty
 import re
 import shutil
 import signal
@@ -42,7 +43,7 @@ import uuid
 from wsgiref.handlers import format_date_time
 from functools import partial
 
-# TODO Reverse shell / telnet server / proxy server
+# TODO (Socks) proxy server
 # TODO ngrok support (?!)
 # TODO htaccess/mod_rewrite support for httpd
 
@@ -1974,6 +1975,70 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         except:
             pass
 
+class TelnetHandler(SocketServer.StreamRequestHandler):
+    "A simple shell server"
+    logger  = logging.getLogger("telnet")
+
+    def __init__(self, request, client_address, server, options={}):
+        self.subprocess_pid = None
+        self.pty_fd = None
+        self.client_address = client_address
+        self.logger.log(logging.INFO, "Incoming connection", { "ip": self.client_address[0] })
+        SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
+
+    def handle(self):
+        pid, fd = pty.fork()
+        if not pid:
+            os.execv(os.environ["SHELL"], (os.environ["SHELL"], "-"))
+            sys.exit(1)
+        self.pty_fd = fd
+        self.subprocess_pid = pid
+
+        self.connection.send("\xff\xfb\x01\xff\xfb\x03") # IAC - Will - echo - IAC - Will - supress go ahead
+
+        child_thread = threading.Thread(target=self._sub_to_sock_thread)
+        child_thread.start()
+
+        while True:
+            data = self.connection.recv(10240)
+            while data and data[0] == "\xff":
+                command = data[:3]
+                data = data[3:]
+                self.logger.debug("Received command: %(command)d %(parameter)d", {"ip": self.client_address[0], "command": ord(command[1]), "parameter": ord(command[2])})
+                if not data:
+                    data = self.connection.recv(10240)
+            if not data:
+                break
+            os.write(self.pty_fd, data)
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except:
+            pass
+
+        os.close(self.pty_fd)
+        self.pty_fd = None
+        child_thread.join()
+
+    def _sub_to_sock_thread(self):
+        while True:
+            try:
+                data = os.read(self.pty_fd, 10240)
+            except:
+                break
+            if not data:
+                break
+            self.connection.send(data)
+        try:
+            self.connection.shutdown(socket.SHUT_RDWR)
+        except:
+            pass
+
+    def finish(self):
+        if self.subprocess_pid:
+            os.kill(self.subprocess_pid, signal.SIGHUP)
+        if self.pty_fd:
+            os.close(self.pty_fd)
+
 def xml_escape(string):
     "Escape special XML/HTML characters"
     return string.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&apos;")
@@ -2088,6 +2153,8 @@ def wait_for_signal(servers, extra_thread_count=0, script_file_name=__file__):
         if signal_count[0] == 1:
             logging.warn("Signal received. Shutting down server sockets.")
             for server in servers:
+                if not server:
+                    pass
                 server.shutdown()
                 server.socket.shutdown(socket.SHUT_RDWR)
                 server.socket.close()
@@ -2247,7 +2314,7 @@ class LogFormatter(logging.Formatter):
 
 def default_port(service):
     if has_pyprivbind:
-        return { "httpd": 80, "ftpd": 21, "httpsd": 443 }[service]
+        return { "httpd": 80, "ftpd": 21, "httpsd": 443, "telnetd": 23 }[service]
     else:
         return 1234
 
@@ -2273,6 +2340,8 @@ def main():
     parser.add_argument("-h", nargs="?", default=False, type=partial(hostportpair, "httpd"), help="Run httpd", metavar="port")
     if has_ssl:
         parser.add_argument("-H", nargs="?", default=False, type=partial(hostportpair, "httpsd"), help="Run httpsd / http2d", metavar="port")
+    parser.add_argument("-t", nargs="?", default=False, type=partial(hostportpair, "telnet"), help="Run telnetd", metavar="port")
+    parser.add_argument("-T", nargs="?", default=False, type=partial(hostportpair, "telnet"), help="Reverse telnet", metavar="remote")
     parser.add_argument("-d", action="store_true", help="Activate webdav in httpd")
     parser.add_argument("-w", action="store_true", help="Activate write access")
     parser.add_argument("-c", action="store_true", help="Allow CGI in httpd")
@@ -2289,7 +2358,7 @@ def main():
     parser.add_argument("--root", help="root directory to serve from", metavar="directory")
     options = vars(parser.parse_args(sys.argv[1:]))
 
-    if options["f"] is False and options["h"] is False and ("H" not in options or options["H"] is False):
+    if options["f"] is False and options["h"] is False and ("H" not in options or options["H"] is False) and options["t"] is False and options["T"] is False:
         parser.print_help()
         parser.exit(0)
     if options["p"]:
@@ -2370,6 +2439,17 @@ def main():
         logger.info("%(what)s server started on %(port)s", {"what": "FTP", "port": ":".join(map(str, ftpd_port))})
         if "a" in options and options["a"]:
             create_avahi_group("ftp", ftpd_port[1])
+
+    if options["t"] is not False:
+        server, telnetd_port = setup_tcp_server(TelnetHandler, options["t"] or ("", default_port("telnetd")), server_options)
+        servers.append(server)
+        logger.info("%(what)s server started on %(port)s", {"what": "Telnet", "port": ":".join(map(str, telnetd_port))})
+
+    if options["T"] is not False:
+        remote_socket = socket.socket()
+        remote_socket.connect(options["T"])
+        threading.Thread(target=TelnetHandler, args=(remote_socket, options["T"], None, server_options)).start()
+        logger.info("%(what)s reverse connected to %(remote)s", {"what": "Telnet", "remote": ":".join(map(str, options["T"]))})
 
     if servers and options["v"]:
         if not has_pyinotify:
