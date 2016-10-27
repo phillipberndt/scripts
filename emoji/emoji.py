@@ -73,7 +73,7 @@ def xlib_send_string(text, window=None):
 
     try:
         for character in text:
-            display.change_keyboard_mapping(254, [ [xlib_unicode_cp_to_keysym(ord(character))] ])
+            display.change_keyboard_mapping(254, [ [xlib_unicode_cp_to_keysym(ord(character))] * len(original_mapping[0]) ])
 
             display.sync()
             for m_type in (Xlib.protocol.event.KeyPress, Xlib.protocol.event.KeyRelease):
@@ -113,12 +113,8 @@ def create_window():
             except:
                 return False
 
-            #clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-            #clipboard.set_text(codepoint, -1)
-            #clipboard.store()
-
             window.retval = codepoint.decode("utf8")
-
+            window.hide()
             GObject.idle_add(Gtk.main_quit, None)
 
             return True
@@ -176,8 +172,23 @@ def get_emoji():
     Gtk.main()
     return window.retval
 
+def set_clipboard(text):
+    def _setter():
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clipboard.set_text(text, -1)
+        clipboard.store()
+        Gtk.main_quit()
+    GObject.idle_add(_setter)
+    Gtk.main()
+
 
 if __name__ == "__main__":
-    focus_widget = xlib_get_active_window()
-    emoji = get_emoji()
-    xlib_send_string(emoji, focus_widget)
+    if False:
+        time.sleep(0.1)
+        focus_widget = xlib_get_active_window()
+        emoji = get_emoji()
+        time.sleep(0.1)
+        xlib_send_string(emoji, focus_widget)
+    else:
+        emoji = get_emoji()
+        set_clipboard(emoji)
