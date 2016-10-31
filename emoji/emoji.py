@@ -19,7 +19,9 @@ from gi.repository import Gtk, GObject, GdkPixbuf, Gdk
 import Xlib.display
 import ctypes
 
-EMOJI_LIST_URL    = "http://www.unicode.org/emoji/charts/full-emoji-list.html"
+EMOJI_LIST_URL    = ( #"http://www.unicode.org/emoji/charts/full-emoji-list.html",
+                      "http://www.unicode.org/emoji/charts-beta/full-emoji-list.html",
+                    )
 EMOJI_LIST_REGEXP = u"(?s)<tr>(?:(?!</tr>|<img).)+<img(?:(?!</tr>|<img).)+<img alt='(?P<codepoint>[^']+)'[^>]+src='(?P<image>data:image/[^']+)'[^>]*>(?:(?!</tr>).)*<td class='name'>(?P<name>[^<]+)"
 
 def get_emoji_cache():
@@ -29,14 +31,21 @@ def get_emoji_cache():
         stream representing the emoji as a PNG file. Said dictionary is cached
         automatically.
     """
-    emoji_cache = shelve.open(os.path.expanduser("~/.cache/emoji.py.db"), protocol=-1, writeback=True)
+    emoji_cache_file = os.path.expanduser("~/.cache/emoji.py.db")
+
+    if os.path.isfile(emoji_cache_file) and os.stat(emoji_cache_file).st_mtime < time.time() - 3600*24*365/2:
+        # Regenerate the cache.
+        os.unlink(emoji_cache_file)
+
+    emoji_cache = shelve.open(emoji_cache_file, protocol=-1, writeback=True)
 
     if not emoji_cache:
-        emoji_list = requests.get(EMOJI_LIST_URL).text
-        for match in re.finditer(EMOJI_LIST_REGEXP, emoji_list):
-            key = match.group("name").encode("utf8")
-            emoji_cache[key] = match.groupdict()
-            emoji_cache[key]["image"] = base64.b64decode(emoji_cache[key]["image"][emoji_cache[key]["image"].find("base64,") + 7:])
+        for url in EMOJI_LIST_URL:
+            emoji_list = requests.get(url).text
+            for match in re.finditer(EMOJI_LIST_REGEXP, emoji_list):
+                key = match.group("name").encode("utf8")
+                emoji_cache[key] = match.groupdict()
+                emoji_cache[key]["image"] = base64.b64decode(emoji_cache[key]["image"][emoji_cache[key]["image"].find("base64,") + 7:])
 
         emoji_cache.sync()
 
@@ -170,7 +179,10 @@ def get_emoji():
     window = create_window()
     window.show_all()
     Gtk.main()
-    return window.retval
+    try:
+        return window.retval
+    except AttributeError:
+        return False
 
 def set_clipboard(text):
     def _setter():
@@ -187,8 +199,10 @@ if __name__ == "__main__":
         time.sleep(0.1)
         focus_widget = xlib_get_active_window()
         emoji = get_emoji()
-        time.sleep(0.1)
-        xlib_send_string(emoji, focus_widget)
+        if emoji:
+            time.sleep(0.1)
+            xlib_send_string(emoji, focus_widget)
     else:
         emoji = get_emoji()
-        set_clipboard(emoji)
+        if emoji:
+            set_clipboard(emoji)
