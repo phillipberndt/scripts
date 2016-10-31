@@ -111,6 +111,11 @@ def create_window():
 
     def _key_press_func(widget, event):
         "Event handler to exit on enter / double click"
+        if event.get_event_type() == Gdk.EventType.KEY_PRESS and event.get_keycode().keycode == 9: # ESC
+            window.hide()
+            GObject.idle_add(Gtk.main_quit, None)
+
+        # (36, 104) == enter keys
         if (event.get_event_type() == Gdk.EventType.KEY_PRESS and event.get_keycode().keycode in (36, 104)) or \
                 event.get_event_type() == getattr(Gdk.EventType, "2BUTTON_PRESS"):
             model, iterator = tree_view.get_selection().get_selected()
