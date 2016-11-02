@@ -22,7 +22,15 @@ import ctypes
 EMOJI_LIST_URL    = ( #"http://www.unicode.org/emoji/charts/full-emoji-list.html",
                       "http://www.unicode.org/emoji/charts-beta/full-emoji-list.html",
                     )
-EMOJI_LIST_REGEXP = u"(?s)<tr>(?:(?!</tr>|<img).)+<img(?:(?!</tr>|<img).)+<img alt='(?P<codepoint>[^']+)'[^>]+src='(?P<image>data:image/[^']+)'[^>]*>(?:(?!</tr>).)*<td class='name'>(?P<name>[^<]+)"
+EMOJI_LIST_REGEXP = ur"""(?sx)<tr>(?:(?!</tr>|<img).)+                       # At the start of an emoji definition
+                        <img(?:(?!</tr>|<img).)+                             # Skip the first image (ugly reference chart picture)
+                        # Extract the data from the 2nd (Apple) reference image instead:
+                        <img\ alt='(?P<codepoint>[^']+)'[^>]+src='(?P<image>data:image/[^']+)'[^>]*>(?:(?!</tr>).)*
+                        <td\ class='name'>(?P<name>[^<]+)(?:(?!</tr>).)*     # Fetch the name of the emoji
+                        <td\ class='name'>(?P<annotations>(?:(?!</td>).)+)   # Fetch the name of the emoji
+                    """
+
+EMOJI_ANNOTATION_REGEXP = u"target='annotate'>([^<]+)<"
 
 def get_emoji_cache():
     """
@@ -44,8 +52,10 @@ def get_emoji_cache():
             emoji_list = requests.get(url).text
             for match in re.finditer(EMOJI_LIST_REGEXP, emoji_list):
                 key = match.group("name").encode("utf8")
-                emoji_cache[key] = match.groupdict()
-                emoji_cache[key]["image"] = base64.b64decode(emoji_cache[key]["image"][emoji_cache[key]["image"].find("base64,") + 7:])
+                data = match.groupdict()
+                data["annotations"] = re.findall(EMOJI_ANNOTATION_REGEXP, data["annotations"])
+                data["image"] = base64.b64decode(data["image"][data["image"].find("base64,") + 7:])
+                emoji_cache[key] = data
 
         emoji_cache.sync()
 
@@ -107,7 +117,8 @@ def create_window():
             return True
         codepoint = model.get_value(iterator, 1)
         name = model.get_value(iterator, 2).lower()
-        return needle in name or needle in codepoint
+        annotations = model.get_value(iterator, 3)
+        return needle in name or needle in codepoint or needle in annotations
 
     def _key_press_func(widget, event):
         "Event handler to exit on enter / double click"
@@ -145,7 +156,7 @@ def create_window():
     search_bar = Gtk.Entry()
     stacker.pack_start(search_bar, False, False, 1)
 
-    tree_model = Gtk.ListStore(GdkPixbuf.Pixbuf, GObject.TYPE_STRING, GObject.TYPE_STRING)
+    tree_model = Gtk.ListStore(GdkPixbuf.Pixbuf, GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_STRING)
     tree_model_filter = tree_model.filter_new()
     tree_model_filter.set_visible_func(_filter_func, search_bar)
 
@@ -153,7 +164,7 @@ def create_window():
         loader = GdkPixbuf.PixbufLoader()
         loader.write(emoji["image"])
         loader.close()
-        tree_model.append((loader.get_pixbuf().scale_simple(32, 32, 0), emoji["codepoint"], emoji["name"]))
+        tree_model.append((loader.get_pixbuf().scale_simple(32, 32, 0), emoji["codepoint"], emoji["name"], "; ".join(emoji["annotations"]).lower()))
 
     tree_view = Gtk.TreeView(tree_model_filter)
 
