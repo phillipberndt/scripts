@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 # encoding: utf-8
 #
-# Simple script to let the user select an emoji and copy it into the clipboard
+# Simple script to let the user select an emoji or other Unicode symbol and
+# copy it into the clipboard
+#
 # Copyright (c) 2016, Phillip Berndt
 #
 import base64
@@ -9,6 +11,7 @@ import os
 import re
 import requests
 import shelve
+import subprocess
 import time
 
 import gi
@@ -18,6 +21,8 @@ from gi.repository import Gtk, GObject, GdkPixbuf, Gdk
 
 import Xlib.display
 import ctypes
+
+# Emoji have nice HTML charts with images. Use those!
 
 EMOJI_LIST_URL    = ( #"http://www.unicode.org/emoji/charts/full-emoji-list.html",
                       "http://www.unicode.org/emoji/charts-beta/full-emoji-list.html",
@@ -31,6 +36,29 @@ EMOJI_LIST_REGEXP = ur"""(?sx)<tr>(?:(?!</tr>|<img).)+                       # A
                     """
 
 EMOJI_ANNOTATION_REGEXP = u"target='annotate'>([^<]+)<"
+
+# Other symbols have a PDF. For now, extract using pdftotext and strip the
+# images. Maybe I'll extend this to include the images someday.
+
+PDF_SYMBOLS_URL = (
+                    "http://unicode.org/charts/PDF/U2190.pdf",
+                    "http://unicode.org/charts/PDF/U1D400.pdf",
+                    "http://unicode.org/charts/PDF/U2200.pdf",
+                    "http://unicode.org/charts/PDF/U25A0.pdf",
+                    "http://unicode.org/charts/PDF/U2700.pdf",
+                    "http://unicode.org/charts/PDF/U2600.pdf",
+                    "http://unicode.org/charts/PDF/U1F300.pdf",
+                    "http://unicode.org/charts/PDF/U1F900.pdf",
+                    "http://unicode.org/charts/PDF/U1F680.pdf",
+                    "http://unicode.org/charts/PDF/U2B00.pdf",
+                    "http://unicode.org/charts/PDF/U2100.pdf",
+                    "http://unicode.org/charts/PDF/U1D400.pdf",
+                    "http://unicode.org/charts/PDF/U1EE00.pdf",
+                    "http://unicode.org/charts/PDF/U2460.pdf",
+                    "http://unicode.org/charts/PDF/U2300.pdf",
+                  )
+
+PDF_SYMBOLS_REGEXP = ur"""(?sm)^[0-9A-F]{2,} (?P<codepoint>.) (?P<explaination>[A-Z ]+)(?:\s+^= (?P<annotations>(?:(?!\n).)+))?"""
 
 def get_emoji_cache():
     """
@@ -51,11 +79,22 @@ def get_emoji_cache():
         for url in EMOJI_LIST_URL:
             emoji_list = requests.get(url).text
             for match in re.finditer(EMOJI_LIST_REGEXP, emoji_list):
-                key = match.group("name").encode("utf8")
+                key = match.group("codepoint").encode("utf8")
                 data = match.groupdict()
                 data["annotations"] = re.findall(EMOJI_ANNOTATION_REGEXP, data["annotations"])
                 data["image"] = base64.b64decode(data["image"][data["image"].find("base64,") + 7:])
                 emoji_cache[key] = data
+
+        for url in PDF_SYMBOLS_URL:
+            symbols_data = requests.get(url).content
+            symbols_text = subprocess.Popen(["pdftotext", "-", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE).communicate(symbols_data)[0].decode("utf8")
+            for match in re.finditer(PDF_SYMBOLS_REGEXP, symbols_text):
+                key = match.group("codepoint").encode("utf8")
+                data = { "name":  match.group("explaination").lower(), "codepoint": match.group("codepoint"),
+                         "annotations": [ x.strip() for x in match.group("annotations").split(",") ] if match.group("annotations") else [], "image": None }
+                # Symbols from PDFs never overwrite emoji's with images
+                if key not in emoji_cache:
+                    emoji_cache[key] = data
 
         emoji_cache.sync()
 
@@ -112,13 +151,17 @@ def create_window():
     """
     def _filter_func(model, iterator, search_bar):
         "TreeView filter function -- search for emoji"
-        needle = search_bar.get_text().lower()
+        needle = search_bar.get_text().lower().split()
         if not needle:
             return True
         codepoint = model.get_value(iterator, 1)
         name = model.get_value(iterator, 2).lower()
         annotations = model.get_value(iterator, 3)
-        return needle in name or needle in codepoint or needle in annotations
+
+        for element in needle:
+            if element not in name and element not in codepoint and element not in annotations:
+                return False
+        return True
 
     def _key_press_func(widget, event):
         "Event handler to exit on enter / double click"
@@ -161,10 +204,14 @@ def create_window():
     tree_model_filter.set_visible_func(_filter_func, search_bar)
 
     for emoji in sorted(get_emoji_cache().values(), key=lambda x: x["name"]):
-        loader = GdkPixbuf.PixbufLoader()
-        loader.write(emoji["image"])
-        loader.close()
-        tree_model.append((loader.get_pixbuf().scale_simple(32, 32, 0), emoji["codepoint"], emoji["name"], "; ".join(emoji["annotations"]).lower()))
+        if emoji["image"]:
+            loader = GdkPixbuf.PixbufLoader()
+            loader.write(emoji["image"])
+            loader.close()
+            pixbuf = loader.get_pixbuf().scale_simple(32, 32, 0)
+        else:
+            pixbuf = None
+        tree_model.append((pixbuf, emoji["codepoint"], emoji["name"], "; ".join(emoji["annotations"]).lower()))
 
     tree_view = Gtk.TreeView(tree_model_filter)
 
