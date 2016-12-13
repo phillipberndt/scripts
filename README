@@ -125,6 +125,11 @@ Contents:
   downloader threads. Currently, the only benefit this has over axel is that it
   maintains a state file which allows to resume interrupted downloads.
 
+* presenter_remote
+
+  A small HTTP server that serves a page that you can use to control your
+  presentations using your smartphone.
+
 * pskill
 
   A interactive pkill variant. Sends SIGKILL automatically if SIGTERM fails,
