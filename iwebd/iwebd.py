@@ -1984,17 +1984,68 @@ class TelnetHandler(SocketServer.StreamRequestHandler):
         self.pty_fd = None
         self.client_address = client_address
         self.logger.log(logging.INFO, "Incoming connection", { "ip": self.client_address[0] })
+        self.options = options
         SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
 
+    def _read_login(self, echo=True):
+        user = ""
+        while True:
+            data = self.connection.recv(1)
+            if not data:
+                break
+            if data == "\xff":
+                self.connection.recv(2)
+                continue
+            if data == "\x7f":
+                if user:
+                    user = user[:-1]
+                    if echo:
+                        self.connection.send("\b \b")
+                continue
+            if data == "\r":
+                self.connection.send("\n\r")
+                break
+            if ord(data) < 32 or ord(data) > 250:
+                continue
+            user += data
+            if echo:
+                self.connection.send(data)
+        return user
+
+    def handle_authentication(self, correct_user, correct_password):
+        self.connection.send("\033[1;32miwebd telnet server\033[0m\n\n\r\033[1m%s\033[0m login: " % socket.gethostname())
+        user = self._read_login()
+        if not user:
+            return False
+        self.connection.send("password: ")
+        password = self._read_login(False)
+        if not password:
+            return False
+        if (correct_user and user != correct_user) or password != correct_password:
+            time.sleep(2)
+            self.connection.send("\n\n\r\033[31mLogin incorrect.\033[0m\r\n")
+            time.sleep(1)
+            return False
+        else:
+            time.sleep(1)
+            self.connection.send("\r\n")
+            return True
+
     def handle(self):
+        self.connection.send("\xff\xfb\x01\xff\xfb\x03") # IAC - Will - echo - IAC - Will - supress go ahead
+
+        if "pass" in self.options and self.options["pass"]:
+            if not self.handle_authentication(self.options["user"], self.options["pass"]):
+                self.logger.log(logging.WARNING, "Authentication failure", { "ip": self.client_address[0] })
+                self.connection.shutdown(socket.SHUT_RDWR)
+                return
+
         pid, fd = pty.fork()
         if not pid:
             os.execv(os.environ["SHELL"], (os.environ["SHELL"], "-"))
             sys.exit(1)
         self.pty_fd = fd
         self.subprocess_pid = pid
-
-        self.connection.send("\xff\xfb\x01\xff\xfb\x03") # IAC - Will - echo - IAC - Will - supress go ahead
 
         child_thread = threading.Thread(target=self._sub_to_sock_thread)
         child_thread.start()
@@ -2340,8 +2391,8 @@ def main():
     parser.add_argument("-h", nargs="?", default=False, type=partial(hostportpair, "httpd"), help="Run httpd", metavar="port")
     if has_ssl:
         parser.add_argument("-H", nargs="?", default=False, type=partial(hostportpair, "httpsd"), help="Run httpsd / http2d", metavar="port")
-    parser.add_argument("-t", nargs="?", default=False, type=partial(hostportpair, "telnet"), help="Run telnetd", metavar="port")
-    parser.add_argument("-T", nargs="?", default=False, type=partial(hostportpair, "telnet"), help="Reverse telnet", metavar="remote")
+    parser.add_argument("-t", nargs="?", default=False, type=partial(hostportpair, "telnetd"), help="Run telnetd", metavar="port")
+    parser.add_argument("-T", nargs="?", default=False, type=partial(hostportpair, "telnetd"), help="Reverse telnet", metavar="remote")
     parser.add_argument("-d", action="store_true", help="Activate webdav in httpd")
     parser.add_argument("-w", action="store_true", help="Activate write access")
     parser.add_argument("-c", action="store_true", help="Allow CGI in httpd")
