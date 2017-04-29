@@ -1,0 +1,9 @@
+1090 outfile.write .. payload 
+
+IOError errno == 4 Interrupted system call
+
+
+# in filenames in webdav not displayed
+
+
+todo fdcopy gegen den IOError absichern
