@@ -1,6 +1,6 @@
 # bpath: Add local prefix to influential environment variables
 #
-# Copyright (c) Phillip Berndt, 2016.
+# Copyright (c) Phillip Berndt, 2016-2017.
 
 _bpath_add_path() {
 	local NAMES VALUE NAME NAMES_ARRAY
@@ -190,10 +190,10 @@ bpath() {
 			_bpath_auto_add_path_recursive CPATH $BASE_DIRECTORY/include -mindepth 1 -maxdepth $SEARCH_DEPTH "(" -name "*.h" -o -type d ")"
 		fi
 		if [ ${VARIABLES_ARRAY[(i)LIBRARY_PATH]} -le ${#VARIABLES_ARRAY} ]; then
-			_bpath_auto_add_path_recursive LIBRARY_PATH $BASE_DIRECTORY/lib -maxdepth $SEARCH_DEPTH "(" -name "*.so" -o -name "*.a" -o -name "*.la" ")"
+			_bpath_auto_add_path_recursive LIBRARY_PATH $BASE_DIRECTORY/lib -maxdepth $SEARCH_DEPTH "(" -regex ".+\\.so\\(\\.[0-9\\.-]+\\)?" -o -name "*.a" -o -name "*.la" ")"
 		fi
 		if [ ${VARIABLES_ARRAY[(i)LD_LIBRARY_PATH]} -le ${#VARIABLES_ARRAY} ]; then
-			_bpath_auto_add_path_recursive LD_LIBRARY_PATH $BASE_DIRECTORY/lib -maxdepth $SEARCH_DEPTH -name "*.so"
+			_bpath_auto_add_path_recursive LD_LIBRARY_PATH $BASE_DIRECTORY/lib -maxdepth $SEARCH_DEPTH -regex ".+\\.so\\(\\.[0-9\\.-]+\\)?"
 		fi
 		if [ ${VARIABLES_ARRAY[(i)PKG_CONFIG_PATH]} -le ${#VARIABLES_ARRAY} ]; then
 			_bpath_add_path PKG_CONFIG_PATH $BASE_DIRECTORY/lib/pkgconfig
