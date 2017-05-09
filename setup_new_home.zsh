@@ -71,6 +71,12 @@ if ! [ -e bin/pip ]; then
 	rm -f get-pip.py
 fi
 
+HAS_PY3=0
+if which python3 >/dev/null 2>&1; then
+	python3 -m venv --system-site-packages .
+	HAS_PY3=1
+fi
+
 cd ..
 
 # Initialize zsh
