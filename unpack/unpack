@@ -259,9 +259,9 @@ GZFile = defaultTypeGenerator(r"\.gz", "application/x-gzip", "gzip", "cat \"$FIL
 for sevenZExecutable in ("7z", "7za", "7zr"):
 	if os.system("which " + sevenZExecutable + " >/dev/null 2>&1") == 0:
 		break
-SEVENZFile = defaultTypeGenerator(r"\.7z", "^$", sevenZExecutable, sevenZExecutable + " x `echo $PARAMS` -o$DEST $FILE")
-MSIFile = defaultTypeGenerator(r"\.msi", "", sevenZExecutable, sevenZExecutable + " x `echo $PARAMS` -o$DEST $FILE")
-ISOFile = defaultTypeGenerator(r"\.iso", "application/x-iso9660", sevenZExecutable, sevenZExecutable + " x `echo $PARAMS` -o$DEST $FILE")
+SEVENZFile = defaultTypeGenerator(r"\.7z", "^$", sevenZExecutable, sevenZExecutable + " x `echo $PARAMS` -o\"$DEST\" \"$FILE\"")
+MSIFile = defaultTypeGenerator(r"\.msi", "", sevenZExecutable, sevenZExecutable + " x `echo $PARAMS` -o\"$DEST\" \"$FILE\"")
+ISOFile = defaultTypeGenerator(r"\.iso", "application/x-iso9660", sevenZExecutable, sevenZExecutable + " x `echo $PARAMS` -o\"$DEST\" \"$FILE\"")
 class DEBFile(filetype): # {{{
 	TYPE_DEF = r"\.deb"
 	TYPE_MIME_DEF = "application/x-debian-package"
