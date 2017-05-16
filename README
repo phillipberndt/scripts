@@ -14,6 +14,14 @@ released under the terms of the GNU Public License 3.0 <http://www.gnu.org/licen
 
 Contents:
 
+* autodep
+
+  A work in progress tool to automate the annoying process of manually
+  installing dependencies while building packages from source. The idea
+  is to scan the output of the build command for known error messages,
+  use apt-file to find the related package, install it, and iterate
+  until the build succeeds.
+
 * check_integrity
 
   Basic, non-hack-proof system integrity checker informing root about
