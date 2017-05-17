@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 
 def error(output):
     """
@@ -97,9 +98,51 @@ def try_build(command_line):
         stdout_data.append(line)
         if build_command.poll() is not None:
             break
+    line = build_command.stdout.read().decode()
+    stdout_data.append(line)
+    print(line, end="")
     return build_command.returncode, "".join(stdout_data)
 
+class PkgConfigEnforcer():
+    """
+        Place a fake pkg-config early in PATH to ensure that we can read its
+        output.
+    """
+    def __init__(self):
+        if os.path.basename(sys.argv[0]) == "pkg-config":
+            args = sys.argv[1:]
+            if "--exists" in args and "--print-errors" not in args:
+                args.insert(0, "--print-errors")
+            pkg_config_output = subprocess.run(["/usr/bin/pkg-config"] + args, check=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            open(os.environ["PKG_CONFIG_TEE_TARGET"], "ab").write(pkg_config_output.stdout)
+            os.execl("/usr/bin/pkg-config", "/usr/bin/pkg-config", *sys.argv[1:])
+            sys.exit(-1)
+        self.orig_path = os.environ["PATH"]
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.tee_target = os.path.join(self.tempdir.name, "tee_target")
+        os.symlink(os.path.abspath(sys.argv[0]), os.path.join(self.tempdir.name, "pkg-config"))
+        os.environ["PATH"] = "%s:%s" % (self.tempdir.name, os.environ["PATH"])
+        os.environ["PKG_CONFIG_TEE_TARGET"] = self.tee_target
+
+    def undo(self):
+        if hasattr(self, "tempdir"):
+            os.environ["PATH"] = self.orig_path
+            del self.tempdir
+
+    def get_output(self, clean=True):
+        if not os.path.isfile(self.tee_target):
+            return ""
+        retval = open(self.tee_target).read()
+        if clean:
+            os.unlink(self.tee_target)
+        return retval
+
+    def __del__(self):
+        self.undo()
+
 def main():
+    pkg_config_enforcer = PkgConfigEnforcer()
+
     if len(sys.argv) == 1:
         print("autodep - automatically install missing dependencies")
         print("Syntax: autodep <command line of make process>")
@@ -113,6 +156,7 @@ def main():
         exit_code, stdout_data = try_build(sys.argv[1:])
         if not exit_code:
             break
+        stdout_data += pkg_config_enforcer.get_output()
         missing_files = parse_output_to_missing_files(stdout_data)
         if not missing_files:
             error("Failed to find any missing files in compiler output")
