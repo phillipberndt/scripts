@@ -378,9 +378,9 @@ class SandboxProvider(VirtualEnvironmentProvider):#{{{
 		download_path = get_temporary_path()
 		install_path = get_installation_path()
 		status("Searching for latest sandbox release")
-		distfiles_site = urllib.urlopen("http://mir0.gentoo-fr.org/distfiles/").read()
+		distfiles_site = urllib.urlopen("http://ftp.uni-erlangen.de/gentoo/distfiles/").read()
 		candidates = sorted(re.findall('"(sandbox-[^"]+)', distfiles_site))
-		distfile = "http://mir0.gentoo-fr.org/distfiles/" + candidates[0]
+		distfile = "http://ftp.uni-erlangen.de/gentoo/distfiles/" + candidates[0]
 		basename = os.path.basename(distfile)
 		install_sh = os.path.join(download_path, "install.sh")
 		with open(install_sh, "w") as file:
