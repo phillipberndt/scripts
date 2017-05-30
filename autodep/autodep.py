@@ -52,9 +52,13 @@ def parse_output_to_missing_files(output):
     # Missing headers (GCC)
     for missing_file in re.findall("fatal error: '(.+)': No such file or directory", output):
         missing_files.add(missing_file)
+    for missing_file in re.findall("fatal error: ([^'].+): No such file or directory", output):
+        missing_files.add(missing_file)
 
     # Missing headers (llvm)
     for missing_file in re.findall("fatal error: '(.+)' file not found", output):
+        missing_files.add(missing_file)
+    for missing_file in re.findall("fatal error: ([^'].+) file not found", output):
         missing_files.add(missing_file)
 
     return missing_files
