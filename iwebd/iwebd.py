@@ -832,8 +832,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             var urls_str = urls.join("&");
             var evt = new EventSource("/.live-reload/feed?" + urls_str);
             evt.onmessage = function(msg) {
+                var cmp = encodeURIComponent(msg.data);
                 for(var url of urls) {
-                    if(url.indexOf(msg.data) >= 0) {
+                    if(url.indexOf(cmp) >= 0) {
                         location.reload();
                         return;
                     }
