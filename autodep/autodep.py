@@ -155,27 +155,32 @@ def main():
         sys.exit(0)
 
     new_packages_installed = set()
-    while True:
-        info("Trying to compile")
-        exit_code, stdout_data = try_build(sys.argv[1:])
-        if not exit_code:
-            break
-        stdout_data += pkg_config_enforcer.get_output()
-        missing_files = parse_output_to_missing_files(stdout_data)
-        if not missing_files:
-            error("Failed to find any missing files in compiler output")
-        info("Found missing files")
-        for file_name in missing_files:
-            print(" - %s" % file_name, file=sys.stderr)
-        print(end="", flush=True)
-        missing_packages = missing_files_to_missing_packages(missing_files)
-        info("Found missing packages")
-        for package_name in missing_packages:
-            print(" - %s" % package_name, file=sys.stderr)
-            new_packages_installed.add(package_name)
-        print(end="", flush=True)
-        info("Installing missing packages")
-        install_missing_packages(missing_packages)
+    try:
+        while True:
+            info("Trying to compile")
+            exit_code, stdout_data = try_build(sys.argv[1:])
+            if not exit_code:
+                break
+            stdout_data += pkg_config_enforcer.get_output()
+            missing_files = parse_output_to_missing_files(stdout_data)
+            if not missing_files:
+                error("Failed to find any missing files in compiler output")
+            info("Found missing files")
+            for file_name in missing_files:
+                print(" - %s" % file_name, file=sys.stderr)
+            print(end="", flush=True)
+            missing_packages = missing_files_to_missing_packages(missing_files)
+            info("Found missing packages")
+            for package_name in missing_packages:
+                print(" - %s" % package_name, file=sys.stderr)
+                new_packages_installed.add(package_name)
+            print(end="", flush=True)
+            info("Installing missing packages")
+            install_missing_packages(missing_packages)
+    except:
+        if new_packages_installed:
+            info("The following packages have been installed: %s" % " ".join(iter(new_packages_installed)))
+        raise
 
     info("Compiled sucessfully.")
     if new_packages_installed:
