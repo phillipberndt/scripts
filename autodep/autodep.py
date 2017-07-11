@@ -61,6 +61,10 @@ def parse_output_to_missing_files(output):
     for missing_file in re.findall("fatal error: ([^'].+) file not found", output):
         missing_files.add(missing_file)
 
+    # Missing dependency
+    for missing_file in re.findall("error while loading shared libraries: ([^:]+)", output):
+        missing_files.add(missing_file)
+
     return missing_files
 
 def missing_files_to_missing_packages(missing_files):
