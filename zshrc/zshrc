@@ -139,7 +139,11 @@ mktmp() {
 	)
 	rm -rf $TDIR
 }
-[ -z $IS_TMP_SUBSHELL ] || export PS1="[tmp] $PS1"
+if [ -n "$IS_TMP_SUBSHELL" ]; then
+	export PS1="[tmp] $PS1"
+	[ -e /etc/profile.d/vte.sh ] && source /etc/profile.d/vte.sh # To ensure gnome-terminal notices the new directory
+	cd .
+fi
 mna() {
 	if [ $# -ne 1 ]; then
 		echo "Add mneoric for current directory"
