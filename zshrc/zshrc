@@ -183,7 +183,7 @@ export PERL_LOCAL_LIB_ROOT="$HOME/.local";
 export PERL_MB_OPT="--install_base $HOME/.local";
 export PERL_MM_OPT="INSTALL_BASE=$HOME/.local";
 export PERL5LIB="$HOME/.local/lib/perl5/:$PERL5LIB";
-ARCHLIB=`ls $HOME/.local/lib/perl5/ | grep -- -linux`
+ARCHLIB=`ls $HOME/.local/lib/perl5/ 2>/dev/null | grep -- -linux`
 if [ -n $ARCHLIB ]; then
 	export PERL5LIB="${ARCHLIB}:$PERL5LIB"
 fi
@@ -203,7 +203,7 @@ fi
 # Set the $DISPLAY variable if it is not set and the user has an open session
 if [ -z "$DISPLAY" ]; then
 	if which loginctl &>/dev/null; then
-		LOGINCTL_SESSION=$(loginctl show-user $USER -p Display | cut -d= -f2)
+		LOGINCTL_SESSION=$(loginctl show-user $USER -p Display 2>/dev/null | cut -d= -f2)
 		if [ -n "$LOGINCTL_SESSION" ]; then
 			export DISPLAY=$(loginctl show-session $LOGINCTL_SESSION -p Display | cut -d= -f2)
 		fi
