@@ -32,10 +32,7 @@ EMOJI_LIST_REGEXP = ur"""(?sx)<tr>(?:(?!</tr>|<img).)+                       # A
                         # Extract the data from the 2nd (Apple) reference image instead:
                         <img\ alt='(?P<codepoint>[^']+)'[^>]+src='(?P<image>data:image/[^']+)'[^>]*>(?:(?!</tr>).)*
                         <td\ class='name'>(?P<name>[^<]+)(?:(?!</tr>).)*     # Fetch the name of the emoji
-                        <td\ class='name'>(?P<annotations>(?:(?!</td>).)+)   # Fetch the name of the emoji
                     """
-
-EMOJI_ANNOTATION_REGEXP = u"target='annotate'>([^<]+)<"
 
 # Other symbols have a PDF. For now, extract using pdftotext and strip the
 # images. Maybe I'll extend this to include the images someday.
@@ -81,7 +78,7 @@ def get_emoji_cache():
             for match in re.finditer(EMOJI_LIST_REGEXP, emoji_list):
                 key = match.group("codepoint").encode("utf8")
                 data = match.groupdict()
-                data["annotations"] = re.findall(EMOJI_ANNOTATION_REGEXP, data["annotations"])
+                data["annotations"] = []
                 data["image"] = base64.b64decode(data["image"][data["image"].find("base64,") + 7:])
                 emoji_cache[key] = data
 
