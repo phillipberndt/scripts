@@ -1,17 +1,26 @@
 # Load zgen
 DISABLE_AUTO_UPDATE="true"
-source "${HOME}/.zsh/zgen/zgen.zsh"
-if ! zgen saved; then
-	zgen oh-my-zsh
-	zgen load zsh-users/zsh-syntax-highlighting
-	zgen load zsh-users/zsh-completions src
-	zgen load zsh-users/zsh-history-substring-search
-	zgen load Tarrasch/zsh-autoenv # .autoenv.zsh USE autostash !!
-	zgen load rimraf/k # k
-	zgen load chrissicool/zsh-256color
-	zgen oh-my-zsh themes/gentoo
-	zgen load oz/safe-paste
-	zgen save
+if [ -e "${HOME}/.zgen/init.zsh" ]; then
+	ZGEN_DIR="${HOME}/.zgen"
+	ZSH="${HOME}/.zgen/robbyrussell/oh-my-zsh-master"
+	source "${HOME}/.zgen/init.zsh"
+
+	autoload -U compinit
+	compinit -d "${ZGEN_DIR}/zcompdump"
+else
+	source "${HOME}/.zsh/zgen/zgen.zsh"
+	if ! zgen saved; then
+		zgen oh-my-zsh
+		zgen load zsh-users/zsh-syntax-highlighting
+		zgen load zsh-users/zsh-completions src
+		zgen load zsh-users/zsh-history-substring-search
+		zgen load Tarrasch/zsh-autoenv # .autoenv.zsh USE autostash !!
+		zgen load rimraf/k # k
+		zgen load chrissicool/zsh-256color
+		zgen oh-my-zsh themes/gentoo
+		zgen load oz/safe-paste
+		zgen save
+	fi
 fi
 
 # bind UP and DOWN arrow keys to history search
