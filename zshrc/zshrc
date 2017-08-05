@@ -227,12 +227,21 @@ if [ -z "$DISPLAY" ]; then
 fi
 
 # Show a todo list after startup
-if ! [ $HOME/.zsh/.todo_zsh_timestamp(ms-$(grep -Eo "^[0-9]+" /proc/uptime)) ]; then
+if [ -e /proc/uptime ]; then
+	STARTUP_UPTIME="$(cat /proc/uptime)"
+	STARTUP_UPTIME="${STARTUP_UPTIME/[ .]*/}"
+elif [ "${OSTYPE/[0-9.]*}" = "darwin" ]; then
+	STARTUP_UPTIME="$(( $(date +%s) - $(sysctl -n kern.boottime | cut -d " " -f4 | tr -d ",") ))"
+fi
+
+if ! [ $HOME/.zsh/.todo_zsh_timestamp(ms-$STARTUP_UPTIME) ]; then
 	touch $HOME/.zsh/.todo_zsh_timestamp
 	todo -i
 fi
 
 # Execute other scripts
-for SCRIPT in $HOME/.zsh/scripts/*(.x,@x); do
-	source $SCRIPT
-done
+if [ -d $HOME/.zsh/scripts/ ]; then
+	for SCRIPT in $HOME/.zsh/scripts/*(.x,@x); do
+		source $SCRIPT
+	done
+fi
