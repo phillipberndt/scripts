@@ -31,6 +31,7 @@
 """
 from __future__ import print_function
 import argparse
+import pickle
 
 import fcntl
 import functools
@@ -225,40 +226,50 @@ class StateShelf(object):
 
 
     def __init__(self, file_name):
-        self._shelf = shelve.open(file_name, protocol=-1, writeback=True)
+        self._persist = {}
         self._locals = {}
+        self._file_name = file_name
+
+        if os.path.isfile(file_name):
+            self._persist.update(pickle.load(open(file_name)))
+
+
+    def __del__(self):
+        self.sync()
 
 
     def __getitem__(self, name):
         if name in StateShelf._local_names:
             return self._locals[name]
         else:
-            return self._shelf[name]
+            return self._persist[name]
 
 
     def __contains__(self, name):
         if name in StateShelf._local_names:
             return name in self._locals
         else:
-            return name in self._shelf
+            return name in self._persist
 
 
     def __setitem__(self, name, value):
         if name in StateShelf._local_names:
             self._locals[name] = value
         else:
-            self._shelf[name] = value
+            self._persist[name] = value
+            self.sync()
 
 
     def __delitem__(self, name):
         if name in StateShelf._local_names:
             del self._locals[name]
         else:
-            del self._shelf[name]
+            del self._persist[name]
+            self.sync()
 
 
     def __nonzero__(self):
-        return bool(self._locals) or bool(self._shelf)
+        return bool(self._locals) or bool(self._persist)
 
 
     def update(self, dictionary):
@@ -267,7 +278,8 @@ class StateShelf(object):
 
 
     def sync(self):
-        return self._shelf.sync()
+        with open(self._file_name, "wb") as out_file:
+            pickle.dump(self._persist, out_file, -1)
 
 
 def get_state_shelf(url, target_file=None):
