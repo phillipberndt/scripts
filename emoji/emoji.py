@@ -197,9 +197,6 @@ def create_window():
     stacker.pack_start(search_bar, False, False, 1)
 
     tree_model = Gtk.ListStore(GdkPixbuf.Pixbuf, GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_STRING)
-    tree_model_filter = tree_model.filter_new()
-    tree_model_filter.set_visible_func(_filter_func, search_bar)
-
     for emoji in sorted(get_emoji_cache().values(), key=lambda x: x["name"]):
         if emoji["image"]:
             loader = GdkPixbuf.PixbufLoader()
@@ -210,6 +207,8 @@ def create_window():
             pixbuf = None
         tree_model.append((pixbuf, emoji["codepoint"], emoji["name"], "; ".join(emoji["annotations"]).lower()))
 
+    tree_model_filter = tree_model.filter_new()
+    tree_model_filter.set_visible_func(_filter_func, search_bar)
     tree_view = Gtk.TreeView(tree_model_filter)
 
     pixbuf = Gtk.CellRendererPixbuf()
