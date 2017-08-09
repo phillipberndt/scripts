@@ -218,17 +218,20 @@ bpath() {
 			_bpath_auto_add_path_recursive CPATH $BASE_DIRECTORY -maxdepth 1 -name "*.h"
 		fi
 		if [ ${VARIABLES_ARRAY[(i)LIBRARY_PATH]} -le ${#VARIABLES_ARRAY} ]; then
-			_bpath_auto_add_path_recursive LIBRARY_PATH $BASE_DIRECTORY -maxdepth $SEARCH_DEPTH "(" -name "*.so" -o -name "*.a" -o -name "*.la" ")"
+			_bpath_auto_add_path_recursive LIBRARY_PATH $BASE_DIRECTORY -maxdepth $SEARCH_DEPTH "(" -name "*.so" -o -name "*.a" -o -name "*.la" -o -name "*.dylib" ")"
 		fi
 		if [ ${VARIABLES_ARRAY[(i)LD_LIBRARY_PATH]} -le ${#VARIABLES_ARRAY} ]; then
 			_bpath_auto_add_path_recursive LD_LIBRARY_PATH $BASE_DIRECTORY -maxdepth $SEARCH_DEPTH -name "*.so"
+		fi
+		if [ ${VARIABLES_ARRAY[(i)DYLD_LIBRARY_PATH]} -le ${#VARIABLES_ARRAY} ]; then
+			_bpath_auto_add_path_recursive DYLD_LIBRARY_PATH $BASE_DIRECTORY -maxdepth $SEARCH_DEPTH -name "*.dylib"
 		fi
 		if [ ${VARIABLES_ARRAY[(i)PKG_CONFIG_PATH]} -le ${#VARIABLES_ARRAY} ]; then
 			_bpath_auto_add_path_recursive PKG_CONFIG_PATH $BASE_DIRECTORY -maxdepth $SEARCH_DEPTH -name "*.pc"
 		fi
 
 		for ENAME in $VARIABLES_ARRAY; do
-			KNOWN_VARIABLES=(PATH CPATH LIBRARY_PATH LD_LIBRARY_PATH PKG_CONFIG_PATH)
+			KNOWN_VARIABLES=(PATH CPATH LIBRARY_PATH LD_LIBRARY_PATH DYLD_LIBRARY_PATH PKG_CONFIG_PATH)
 			if [ "$VARIABLES_OVERRIDDEN" -eq 0 -a "$ENAME" = "XDG_DATA_DIRS" ]; then
 				# Never do this on our own - there is no reliable way to detect a share/
 				# directory.
