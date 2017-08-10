@@ -135,11 +135,12 @@ gitup() {
 	done
 }
 mktmp() {
+	PREFIX=${1:-/tmp}
 	local TDIR
-	TDIR=/tmp/tmp-$RANDOM
+	TDIR=$PREFIX/tmp-$RANDOM
 	while ! [ -d $TDIR ]; do
 		mkdir -m 0711 $TDIR && break
-		TDIR=/tmp/tmp-$RANDOM
+		TDIR=$PREFIX/tmp-$RANDOM
 	done
 	echo Entering $TDIR. This directory will be deleted once you exit the subshell.
 	(
