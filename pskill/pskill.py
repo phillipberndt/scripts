@@ -12,6 +12,12 @@ import time
 
 from itertools import chain
 
+try:
+    from psutil import Process, process_iter
+    HAS_PSUTIL = True
+except:
+    HAS_PSUTIL = False
+
 TEXT_RED = "\033[31m"
 TEXT_GREEN = "\033[32m"
 TEXT_YELLOW = "\033[33m"
@@ -23,35 +29,60 @@ TEXT_TO_ALTERNATE = "\033[?1049h"
 TEXT_TO_NORMAL = "\033[?1049l"
 TEXT_BG_GREY = "\033[47m"
 
+
 class Highlight(str):
     def __repr__(self):
         return "*%s*" % (str(self),)
 
-def query_procfs(pid):
-    if sys.version < '3' and isinstance(pid, long):
-        pid = int(pid)
-    cmd_file = os.path.join("/proc/", str(pid), "cmdline")
-    status_file = os.path.join("/proc/", str(pid), "status")
-    if (isinstance(pid, int) or pid.isdigit()) and os.access(cmd_file, os.R_OK):
-        pid = int(pid)
-        if pid == os.getpid():
-            return None
-        cmd_line = u" ".join((u'"%s"' % x.replace('"', r'\"') if " " in x else x.replace('"', r'\"') \
-                             for x in io.open(cmd_file).read().split("\0")))
 
-        owner = int([x for x in open(status_file).readlines() if x.startswith("Uid:")][0].split()[1])
-        return {"pid": pid, "cmd_line": cmd_line, "owner": owner}
-    return None
+if not HAS_PSUTIL:
+    def process_iter():
+        for pid in os.listdir("/proc/"):
+            if pid.isdigit():
+                yield Process(int(pid))
 
-def ppid_cascade(pid=None):
-    if pid is None:
-        pid = os.getpid()
-    while True:
-        try:
-            pid = int(re.search("PPid:\s+([0-9]+)", open("/proc/%d/status" % pid).read()).group(1))
-            yield pid
-        except:
-            break
+    class Process(object):
+        def __init__(self, pid=None):
+            if not pid:
+                pid = os.getpid()
+            if sys.version < '3' and isinstance(pid, long):
+                pid = int(pid)
+            self.pid = pid
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, type, value, tb):
+            pass
+
+        def oneshot(self):
+            return self
+
+        def cmdline(self):
+            cmd_file = os.path.join("/proc/", str(self.pid), "cmdline")
+            return io.open(cmd_file).read().split("\0")
+
+        def parent(self):
+            try:
+                status_file = os.path.join("/proc/", str(self.pid), "status")
+                pid = int(re.search("PPid:\s+([0-9]+)", open(status_file).read()).group(1))
+                assert pid > 0
+            except:
+                return None
+            return Process(pid)
+
+        def uids(self):
+            status_file = os.path.join("/proc/", str(self.pid), "status")
+            return map(int, [x for x in open(status_file).readlines() if x.startswith("Uid:")][0].split()[1:])
+
+
+def ppid_cascade(process=None):
+    if process is None:
+        process = Process()
+    process = process.parent()
+    while process:
+        yield process.pid
+        process = process.parent()
 
 def get_x11_list(for_uid=None):
     try:
@@ -83,16 +114,22 @@ def get_x11_list(for_uid=None):
         if pid in protected_pids:
             continue
 
-        data = query_procfs(pid)
+        data = query_process(pid)
         if data and (for_uid is None or for_uid == 0 or data["owner"] == for_uid):
             data["cmd_line"] = u"%s [%s]" % (data["cmd_line"], name)
             yield data
 
+def query_process(process=None):
+    if not isinstance(process, Process):
+        process = Process(process)
+    cmd_line = u" ".join((u'"%s"' % x.replace('"', r'\"') if " " in x else x.replace('"', r'\"') \
+                         for x in process.cmdline()))
+    return {"pid": process.pid, "cmd_line": cmd_line, "owner": process.uids()[0]}
+
 def get_proc_list(for_uid=None):
-    for pid in os.listdir("/proc/"):
-        data = query_procfs(pid)
-        if data and (for_uid is None or for_uid == 0 or data["owner"] == for_uid):
-            yield data
+    for process in process_iter():
+        if not for_uid or for_uid in process.uids():
+            yield query_process(process)
 
 def get_proc_lists(for_uid=None):
     return chain(get_proc_list(for_uid), get_x11_list(for_uid))
