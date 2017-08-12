@@ -234,10 +234,6 @@ class StateShelf(object):
             self._persist.update(pickle.load(open(file_name)))
 
 
-    def __del__(self):
-        self.sync()
-
-
     def __getitem__(self, name):
         if name in StateShelf._local_names:
             return self._locals[name]
@@ -278,8 +274,12 @@ class StateShelf(object):
 
 
     def sync(self):
-        with open(self._file_name, "wb") as out_file:
-            pickle.dump(self._persist, out_file, -1)
+        try:
+            with open(self._file_name, "wb") as out_file:
+                pickle.dump(self._persist, out_file, -1)
+        except KeyboardInterrupt:
+            self.sync()
+            raise
 
 
 def get_state_shelf(url, target_file=None):
