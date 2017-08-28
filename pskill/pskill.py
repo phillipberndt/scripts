@@ -129,7 +129,10 @@ def query_process(process=None):
 def get_proc_list(for_uid=None):
     for process in process_iter():
         if not for_uid or for_uid in process.uids():
-            yield query_process(process)
+            try:
+                yield query_process(process)
+            except:
+                pass
 
 def get_proc_lists(for_uid=None):
     return chain(get_proc_list(for_uid), get_x11_list(for_uid))
