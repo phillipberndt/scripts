@@ -57,6 +57,7 @@ if ! which virtualenv > /dev/null; then
 	wget -O bin/virtualenv https://raw.github.com/pypa/virtualenv/master/virtualenv.py
 	chmod a+x bin/virtualenv
 	./bin/virtualenv --system-site-packages .
+	rm -f ./bin/virtualenv
 else
 	virtualenv --system-site-packages .
 fi
@@ -71,9 +72,16 @@ if ! [ -e bin/pip ]; then
 	rm -f get-pip.py
 fi
 
+if ! [ -e bin/virtualenv ]; then
+	pip install virtualenv
+fi
+
+pip install ipython requests flask jedi pexpect psutil
+
 HAS_PY3=0
 if which python3 >/dev/null 2>&1; then
 	python3 -m venv --system-site-packages .
+	pip3 install ipython requests flask jedi pexpect psutil
 	HAS_PY3=1
 fi
 

@@ -11,6 +11,12 @@ Unless stated otherwise in specific files, everything within this repository is
 released under the terms of the GNU Public License 3.0 <http://www.gnu.org/licenses/gpl-3.0.html>.
 
 
+To get startet:
+
+wget https://raw.githubusercontent.com/phillipberndt/scripts/master/setup_new_home.zsh
+zsh setup_new_home.zsh
+
+
 
 Contents:
 
