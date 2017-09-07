@@ -73,15 +73,15 @@ if ! [ -e bin/pip ]; then
 fi
 
 if ! [ -e bin/virtualenv ]; then
-	pip2 install virtualenv
+	bin/pip2 install virtualenv
 fi
 
-pip2 install ipython requests flask jedi pexpect psutil
+bin/pip2 install ipython requests flask jedi pexpect psutil
 
 HAS_PY3=0
 if which python3 >/dev/null 2>&1; then
 	python3 -m venv --system-site-packages .
-	pip3 install ipython requests flask jedi pexpect psutil
+	bin/pip3 install ipython requests flask jedi pexpect psutil
 	HAS_PY3=1
 fi
 
