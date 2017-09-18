@@ -193,16 +193,21 @@ mncd() {
 }
 
 # Set up my environment
-export LANG="en_US.UTF-8"
-export LC_NUMERIC="de_DE.UTF-8"
-export LC_TIME="de_DE.UTF-8"
-export LC_MONETARY="de_DE.UTF-8"
-export LC_PAPER="de_DE.UTF-8"
-export LC_IDENTIFICATION="de_DE.UTF-8"
-export LC_NAME="de_DE.UTF-8"
-export LC_ADDRESS="de_DE.UTF-8"
-export LC_TELEPHONE="de_DE.UTF-8"
-export LC_MEASUREMENT="de_DE.UTF-8"
+export LANG=en_US.UTF-8
+unset LC_CTYPE
+unset LANGUAGE
+export LC_NUMERIC=de_DE.UTF-8
+export LC_TIME=de_DE.UTF-8
+unset LC_COLLATE
+export LC_MONETARY=de_DE.UTF-8
+unset LC_MESSAGES
+export LC_PAPER=de_DE.UTF-8
+export LC_NAME=de_DE.UTF-8
+export LC_ADDRESS=de_DE.UTF-8
+export LC_TELEPHONE=de_DE.UTF-8
+export LC_MEASUREMENT=de_DE.UTF-8
+export LC_IDENTIFICATION=de_DE.UTF-8
+unset LC_ALL
 
 # Library directories for perl, etc.
 export PERL_LOCAL_LIB_ROOT="$HOME/.local";
