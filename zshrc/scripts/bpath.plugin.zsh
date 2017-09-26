@@ -6,7 +6,7 @@ _bpath_add_path() {
 	local NAMES VALUE NAME NAMES_ARRAY
 
 	NAMES=$1
-	VALUE=$(readlink -f "$2" 2>/dev/null)
+	VALUE=`echo $2(:a)`
 
 	if [ ! -d "$VALUE" ]; then
 		return
