@@ -249,7 +249,7 @@ TBZFile = defaultTypeGenerator(r"\.(tbz|tar\.bz2?)", "application/x-tar.+applica
 TGZFile = defaultTypeGenerator(r"\.(tgz|tar\.g?z)", "application/x-tar.+application/x-gzip", "tar", "tar xz `echo $PARMAS` -C \"$DEST\" -f \"$FILE\"")
 TXZFile = defaultTypeGenerator(r"\.tar\.xz", "application/x-tar.+application/x-xz", "tar", "tar x `echo $PARAMS` --xz -C \"$DEST\" -f \"$FILE\"")
 TARFile = defaultTypeGenerator(r"\.tar", "application/x-tar", "tar", "tar x `echo $PARAMS` -C \"$DEST\" -f \"$FILE\"")
-TARFile = defaultTypeGenerator(r"\.tar\.zst", "", "tar zstdcat", "zstdcat \"$FILE\" | tar x `echo $PARAMS` -C \"$DEST\"")
+TARFZstile = defaultTypeGenerator(r"\.tar\.zst", "", "tar zstdcat", "zstdcat \"$FILE\" | tar x `echo $PARAMS` -C \"$DEST\"")
 CABFile = defaultTypeGenerator(r"\.cab", "^$", "cabextract", "cabextract `echo $PARAMS` -d \"$DEST\" \"$FILE\"")
 LHAFile = defaultTypeGenerator(r"\.lha", "application/x-lha", "lha", "lha x `echo $PARAMS` -w=\"$DEST\" \"$FILE\"")
 ARJFile = defaultTypeGenerator(r"\.arj", "application/x-arj", "arj", "arj x `echo $PARAMS` \"$FILE\" \"$DEST\"")
