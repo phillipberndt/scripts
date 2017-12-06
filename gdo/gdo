@@ -1,190 +1,96 @@
-#!/usr/bin/perl
-# vim:fileencoding=utf-8:ft=perl
-# a better find
-use strict;
-use File::Find;
-use Getopt::Long;
-use Term::ProgressBar;
-use Pod::Usage;
+#!/usr/bin/env python
+#
+# Replacement for the Perl gdo
+# Quick & dirty implementation
+#
+# TODO Multiple patterns are currently OR'ed. AND them, as before. Support
+#      backreferencing to any pattern.
+#
+from __future__ import print_function
+import sys
 
-# Load options
-use vars qw($test $progress $caseSensitive $wantHelp $matchParts $onlyOne);
-my $directory = ".";
-Getopt::Long::Configure ("bundling", "no_getopt_compat", "prefix_pattern=--|-");
-GetOptions(
-	"test|t!" => \$test,
-	"proress|p!" => \$progress,
-	"directory|d:s" => \$directory,
-	"case-sensitive|s!" => \$caseSensitive,
-	"fuzzy|f!" => \$matchParts,
-	"one|o!" => \$onlyOne,
-	"help|h!" => \$wantHelp,
-);
-pod2usage({ exitval => 1, msg => "gdo Usage:\n gdo [options] <search pattern> +<anded-search-pattern> [<substitution>]\n" }) if $wantHelp or $#ARGV < 0;
-my $search = shift @ARGV;
-if($directory eq "." && $search =~ m#/#) {
-	$search =~ m#^(.+)/([^/]+)$#;
-	$directory = $1;
-	$search = $2;
-}
-my @ands;
-while($#ARGV != -1 and $ARGV[0] =~ m/^\+/) {
-	push @ands, substr(shift @ARGV, 1);
-}
-if($#ARGV == -1) {
-	push @ARGV, qw(echo %0);
-}
-if("@ARGV" !~ m/\$|%/) {
-	push @ARGV, "%0";
-}
+import argparse
+import os
+import re
+import pipes
+import subprocess
 
-if($matchParts) {
-	foreach my $value (@ands) {
-		$value =~ s/./$&.*/g;
-	}
-	$search =~ s/./$&.*/g;
-}
+REMAINDER_HELP = """As parameters, supply a PCRE mattern (or multiple patterns,
+    which are logically OR chained, where you'll need to prefix every pattern
+    starting from the 2nd with a +), and optionally a command line to be invoked
+    using the results. You can use backreferencing ($1..) in the command line. If
+    you skip the command, it defaults to echo."""
 
-if($caseSensitive) {
-	foreach my $value (@ands) {
-		$value = "(?-i)" . $value;
-	}
-	$search = "(?-i)" . $search;
-}
+def main():
+    parser = argparse.ArgumentParser(description="find -regex FOO -exec BAR replacement with PCRE support")
+    parser.add_argument("-t", dest="test", help="Test. Don't execute the substituted command but output it only.", action="store_true")
+    parser.add_argument("-d", dest="directory", help="The directory to search in. Defaults to ./", default="./")
+    parser.add_argument("args", nargs=argparse.REMAINDER, help=REMAINDER_HELP)
+    args = parser.parse_args()
 
-# The match function
-sub match {
-	return unless -f;
+    patterns = []
+    command_line = []
 
-	my $file = $_;
+    in_pattern = True
+    has_dollar_replacement = False
 
-	$file =~ m/(?i)$search/ || return;
-	for (@ands) {
-		$file =~ m/(?i)$_/ || return;
-	}
+    for arg in args.args:
+        if in_pattern and (not patterns or arg[0] == "+"):
+            if arg and arg[0] == "+":
+                arg = arg[1:]
+            patterns.append(re.compile(arg, re.IGNORECASE))
+        else:
+            in_pattern = False
+            if arg and arg[0] in ("$", "%"):
+                has_dollar_replacement = True
+            command_line.append(arg)
 
-	# Build a result array with [ $filename, $1, $2, .. ]
-	my @result;
-	push @result, $file;
-	for (1..@-) {
-		push @result, substr($file, $-[$_], $+[$_] - $-[$_]);
-	}
+    if not patterns:
+        patterns.append(re.compile("."))
 
-	# Substitute in substition
-	my @execute = ( @ARGV );
-	map({ s/(?:\$|%)([0-9]+)/@result[$1]/g; } @execute);
+    if command_line and not has_dollar_replacement:
+        command_line.append("$0")
 
-	if($test) {
-		local $" = '", "';
-		print 'system("' . "@execute" . '");' . "\n";
-	} else {
-		if(my $returnValue = system(@execute)) {
-			warn "Command failed for " . $file . " (Code: " . $returnValue . ")\n";
-			if($returnValue == 2) {
-				# Sigint?!
-				exiter();
-			}
-		}
-	}
+    def gen_command_line_builder(command):
+        if command[0] in ("$", "%") and command[1:].isdigit():
+            group = int(command[1:])
+            if group == 0:
+                return lambda match: match.string
+            return lambda match: match.group(group)
+        else:
+            return lambda match: command
 
-	exit(0) if($onlyOne);
-}
+    execable_command_line = []
+    for command in command_line:
+        execable_command_line.append(gen_command_line_builder(command))
 
-# Exit after 2 Sig int's
-my $chldReceived = 0;
-sub exiter {
-	$chldReceived = 0 if $chldReceived < 0;
-	$chldReceived += 2;
-	if($chldReceived == 2) {
-		warn "Received interrupt. Send again to exit.\n";
-	}
-	if($chldReceived > 2) {
-		print "\n\n";
-		exit 1;
-	}
-};
+    command_line_builder = lambda match: [ x(match) for x in execable_command_line ]
 
-if($progress) {
-	# Show progress bar
-	$| = 1;
-	print "Building filelist";
+    output_to_tty = sys.stdout.isatty()
 
-	my @fileList;
-	sub buildProgress {
-		return unless -f and m/(?i)$search/;
-		for (@ands) {
-			return unless m/(?i)$_/;
-		}
-		push @fileList, $_;
-	}
-	find({ wanted => \&buildProgress, no_chdir => 1 }, ( $directory ));
-	my $progressBar = Term::ProgressBar->new({count => scalar @fileList, ETA  => "linear"});
-	my $progress = 0;
+    for root, dirs, files in os.walk(args.directory):
+        for file_name in files:
+            full_path = os.path.join(root, file_name)
+            for pattern in patterns:
+                result = pattern.search(full_path)
+                if result:
+                    if not command_line:
+                        if output_to_tty:
+                            left, right = result.span()
+                            print(full_path[:left], "\033[31m", full_path[left:right], "\033[39m", full_path[right:], sep="")
+                        else:
+                            print(full_path)
+                    else:
+                        this_match_command = map(pipes.quote, command_line_builder(result))
+                        joined_command = " ".join(this_match_command)
+                        if args.test:
+                            print(joined_command)
+                        else:
+                            subprocess.call(joined_command, shell=True)
+                    break
 
-	for (@fileList) {
-		$progressBar->update(++$progress);
-		$chldReceived -= 1;
-
-		open(OLDOUT, ">&STDOUT");
-		open(STDOUT, ">/dev/null");
-		match($_);
-		close(STDOUT);
-		open(STDOUT, ">&OLDOUT")
-	}
-	$progressBar->update(scalar @fileList);
-} else {
-	# Plain old search
-	find({ wanted => \&match, no_chdir => 1 }, ( $directory ));
-}
-
-__END__
-=head1 DESCRIPTION
-
-gdo - a simple search/replace PCRE matching execution helper
-
-==head1 SYNOPSIS
-
-gdo [options] <search> [ <substitution> ]
-
-gdo will iterate over all files in <directory> and match the files against
-<search>. It will then substitute all $0-$n in <substitution> with parts of the
-search match and execute <substitution>.
-
-Substitution defaults to "echo %0". If you don't supply any %[0-9] parameter,
-this script will automatically add %0 in the end.
-
-=head1 OPTIONS
-
-=over
-
-=item -t
-
-Test. Don't execute the substituted command but output it only.
-
-=item -p
-
-Show a progress bar and hide output of the executed command.
-
-=item -d
-
-The directory to search in. Defaults to ./.
-
-=item -s
-
-Search case sensitive
-
-=item -f
-
-Fuzzy matching: e.g., etinapa matches /etc/init.d/apache
-
-=item -o
-
-Only show/use the first match
-
-=back
-
-=head1 AUTHOR
-
-Phillip Berndt <mail at pberndt dot com>
-
-=cut
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(1)
