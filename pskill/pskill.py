@@ -98,7 +98,7 @@ def get_x11_list(for_uid=None):
     wm_name_atom = dpy.get_atom("_NET_WM_NAME")
     hostname = socket.gethostname()
 
-    protected_pids = list(ppid_cascade())
+    protected_pids = list(ppid_cascade()) + [ os.getpid() ]
 
     for wnd_id in dpy.screen().root.get_property(cl_atom, 0, 0, 10000).value:
         wnd = dpy.create_resource_object("window", wnd_id)
@@ -127,7 +127,10 @@ def query_process(process=None):
     return {"pid": process.pid, "cmd_line": cmd_line, "owner": process.uids()[0]}
 
 def get_proc_list(for_uid=None):
+    protected_pids = list(ppid_cascade()) + [ os.getpid() ]
     for process in process_iter():
+        if process.pid in protected_pids:
+            continue
         if not for_uid or for_uid in process.uids():
             try:
                 yield query_process(process)
