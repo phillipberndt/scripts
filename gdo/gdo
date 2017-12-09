@@ -3,9 +3,6 @@
 # Replacement for the Perl gdo
 # Quick & dirty implementation
 #
-# TODO Multiple patterns are currently OR'ed. AND them, as before. Support
-#      backreferencing to any pattern.
-#
 from __future__ import print_function
 import sys
 
@@ -16,18 +13,26 @@ import pipes
 import subprocess
 
 REMAINDER_HELP = """As parameters, supply a PCRE mattern (or multiple patterns,
-    which are logically OR chained, where you'll need to prefix every pattern
+    which are logically AND chained, where you'll need to prefix every pattern
     starting from the 2nd with a +), and optionally a command line to be invoked
-    using the results. You can use backreferencing ($1..) in the command line. If
-    you skip the command, it defaults to echo."""
+    using the results. You can use backreferencing ($1 to ref the first/only
+    pattern or $N.M to ref the Mth subgroup of the Nth one, $0 as special ref
+    to the whole file name) in the command line. If you skip the command, it
+    defaults to echo. If you do not backreference, the file name will be added
+    as the last argument to any command you give."""
 
 def main():
-    parser = argparse.ArgumentParser(description="find -regex FOO -exec BAR replacement with PCRE support")
-    parser.add_argument("-t", dest="test", help="Test. Don't execute the substituted command but output it only.", action="store_true")
-    parser.add_argument("-d", dest="directory", help="The directory to search in. Defaults to ./", default="./")
+    # Command line handling
+    parser = argparse.ArgumentParser(description="What you'd expect from `find -regex '_(\w+)' "
+                                    "-regextype pcre -exec \"foo $1\"'.")
+    parser.add_argument("-t", dest="test", help="Test. Don't execute the substituted command "
+                        "but output it only.", action="store_true")
+    parser.add_argument("-d", dest="directory", help="The directory to search in. Defaults "
+                        "to ./", default="./")
     parser.add_argument("args", nargs=argparse.REMAINDER, help=REMAINDER_HELP)
     args = parser.parse_args()
 
+    # Split remainder of command line into patterns/args
     patterns = []
     command_line = []
 
@@ -41,53 +46,110 @@ def main():
             patterns.append(re.compile(arg, re.IGNORECASE))
         else:
             in_pattern = False
-            if arg and arg[0] in ("$", "%"):
+            if arg and re.search("[$%][0-9]+", arg):
                 has_dollar_replacement = True
             command_line.append(arg)
 
+    # If mattern is missing, add default "match any"
     if not patterns:
         patterns.append(re.compile("."))
 
+    # If command has no backreferencing, add file name as
+    # last argument
     if command_line and not has_dollar_replacement:
         command_line.append("$0")
 
+    # Helper function to replace the file names / backreferences in. This is long since
+    #  1) it needs to reference multiple regex matches
+    #  2) it needs to handle escaping (\$1 should not be replaced, \\$1 should)
     def gen_command_line_builder(command):
-        if command[0] in ("$", "%") and command[1:].isdigit():
-            group = int(command[1:])
-            if group == 0:
-                return lambda match: match.string
-            return lambda match: match.group(group)
-        else:
-            return lambda match: command
+        def replacer(matches):
+            result = []
+            i = 0
+            l = len(command)
+            while i < l:
+                c = command[i]
+                if c == "\\":
+                    i += 1
+                    if i < l:
+                        result.append(command[i])
+                    i += 1
+                    continue
+                elif c in ("%", "$"):
+                    i += 1
+                    if i < l and command[i].isdigit():
+                        no_start = i
+                        while i < l and command[i].isdigit():
+                            i += 1
+                        no1 = int(command[no_start:i])
+                        no2 = False
+                        if i < l and command[i] == ".":
+                            i += 1
+                            if i < l and command[i].isdigit():
+                                no_start = i
+                                while i < l and command[i].isdigit():
+                                    i += 1
+                                no2 = int(command[no_start:i])
+                        if no2 is False:
+                            matches_group = 0
+                            sub_group = no1
+                        else:
+                            matches_group = no1
+                            sub_group = no2
+                        if sub_group > 0 or no2 is not False:
+                            result.append(matches[matches_group].group(sub_group))
+                        else:
+                            result.append(matches[0].string)
+                        continue
+                    else:
+                        result.append(c)
+                else:
+                    result.append(c)
+                    i += 1
+            return "".join(result)
+        return replacer
 
+    # Generate a runnable which produces a properly replaced command line
     execable_command_line = []
     for command in command_line:
         execable_command_line.append(gen_command_line_builder(command))
-
     command_line_builder = lambda match: [ x(match) for x in execable_command_line ]
 
+    # We only want color (below) in TTYs
     output_to_tty = sys.stdout.isatty()
 
+    # Recursively walk the directories
     for root, dirs, files in os.walk(args.directory):
         for file_name in files:
             full_path = os.path.join(root, file_name)
+
+            # All patterns must match
+            matches = []
             for pattern in patterns:
-                result = pattern.search(full_path)
-                if result:
-                    if not command_line:
-                        if output_to_tty:
-                            left, right = result.span()
-                            print(full_path[:left], "\033[31m", full_path[left:right], "\033[39m", full_path[right:], sep="")
-                        else:
-                            print(full_path)
-                    else:
-                        this_match_command = map(pipes.quote, command_line_builder(result))
-                        joined_command = " ".join(this_match_command)
-                        if args.test:
-                            print(joined_command)
-                        else:
-                            subprocess.call(joined_command, shell=True)
+                matches.append(pattern.search(full_path))
+                if not matches[-1]:
                     break
+            else:
+                # If they do (no break was executed, hence the else), then:
+                if not command_line:
+                    # No command -> Output, highlighting the match
+                    if output_to_tty:
+                        left, right = matches[0].span()
+                        print(full_path[:left], "\033[48;2;255;255;0m",
+                              full_path[left:right], "\033[0m",
+                              full_path[right:], sep="")
+                    else:
+                        print(full_path)
+                else:
+                    # Commands given: Build command line,
+                    this_match_command = map(pipes.quote, command_line_builder(matches))
+                    joined_command = " ".join(this_match_command)
+                    if args.test:
+                        # either print
+                        print(joined_command)
+                    else:
+                        # or call
+                        subprocess.call(joined_command, shell=True)
 
 if __name__ == "__main__":
     try:
