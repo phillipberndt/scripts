@@ -2388,6 +2388,29 @@ def autoreload(main_pid, watch_file_name):
     logger.info("autoreload active")
     notifier.loop()
 
+def iterate_interfaces():
+    if not hasattr(libc, "getifaddrs"):
+        return
+
+    class Ifap(ctypes.Structure):
+        _fields_ = [("ifa_next", ctypes.c_void_p),
+                    ("ifa_name", ctypes.c_char_p),
+                    ("ifa_flags", ctypes.c_int),
+                    ("ifa_addr", ctypes.c_void_p)]
+
+    ptype = ctypes.POINTER(Ifap)
+    ifap = ptype()
+    libc.getifaddrs(ctypes.byref(ifap))
+    ptr = ifap
+    while ptr:
+        if_name = ptr.contents.ifa_name
+        addr = ctypes.c_buffer("", 255)
+        libc.getnameinfo(ptr.contents.ifa_addr, 255, addr, 255, 0, 0, 1)
+        ip = addr.value
+        ptr = ctypes.cast(ptr.contents.ifa_next, ptype)
+        yield if_name, ip
+    libc.freeifaddrs(ifap)
+
 def main():
     user = False
     password = False
@@ -2516,6 +2539,13 @@ def main():
             ar_thread.daemon = True
             ar_thread.start()
             extra_thread_count += 1
+
+    if servers:
+        interfaces = [ (ifname, ip) for ifname, ip in iterate_interfaces() if ip and ifname != "lo" ]
+        if interfaces:
+            logging.info("Serving on the following IPs:")
+            for ifname, group in itertools.groupby(sorted(interfaces), lambda x: x[0]):
+                logging.info(" - %15s: %s", ifname, ", ".join([ x[1] for x in group ]))
 
     wait_for_signal(servers, extra_thread_count, script_file_name)
 
