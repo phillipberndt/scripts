@@ -108,7 +108,7 @@ except:
 
 try:
     import ctypes
-    libc = ctypes.CDLL("", use_errno=True)
+    libc = ctypes.CDLL(None, use_errno=True)
     libc.sendfile.restype = ctypes.c_ssize_t
     libc.sendfile.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_voidp, ctypes.c_size_t)
     libc.strerror.restype = ctypes.c_char_p
@@ -2405,7 +2405,14 @@ def iterate_interfaces():
     while ptr:
         if_name = ptr.contents.ifa_name
         addr = ctypes.c_buffer("", 255)
-        libc.getnameinfo(ptr.contents.ifa_addr, 255, addr, 255, 0, 0, 1)
+        if not ptr.contents.ifa_addr:
+            ptr = ctypes.cast(ptr.contents.ifa_next, ptype)
+            continue
+        addr_type = ctypes.cast(ptr.contents.ifa_addr, ctypes.POINTER(ctypes.c_short)).contents.value
+        if addr_type not in (2, 10):
+            ptr = ctypes.cast(ptr.contents.ifa_next, ptype)
+            continue
+        libc.getnameinfo(ptr.contents.ifa_addr, 16 if addr_type == 2 else 30, addr, 255, 0, 0, 1)
         ip = addr.value
         ptr = ctypes.cast(ptr.contents.ifa_next, ptype)
         yield if_name, ip
