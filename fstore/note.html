@@ -1,0 +1,114 @@
+<!DOCTYPE HTML>
+<meta charset=utf8>
+<title>fstore - {{ fn }}</title>
+<style type="text/css">
+	#state {
+		position: absolute;
+		right: 0;
+		top: 0;
+		padding: .5em;
+		background: #080;
+		font-weight: bold;
+		color: #fff;
+	}
+	#data {
+		min-height: 100%;
+	}
+	html, body {
+		height: 98%;
+	}
+</style>
+<script type="text/javascript">
+	window.addEventListener("load", () => {
+		let update_interval = 2000;
+
+		var data = document.querySelector("body #data");
+		var state = document.querySelector("body #state");
+
+		data.focus();
+
+		let last_change_submitted = 0;
+		let save_pending = false;
+		let has_unprocessed_changes = false;
+
+		function process_unsaved_changes() {
+			state.innerHTML = "Pending";
+			state.style.background = "#bb0";
+
+			if(save_pending || has_unprocessed_changes) {
+				has_unprocessed_changes = true;
+				return;
+			}
+			has_unprocessed_changes = true;
+			let now = (new Date()).valueOf();
+
+			if(now - last_change_submitted > update_interval) {
+				save_now();
+			}
+			else {
+				setTimeout(save_now, update_interval - (now - last_change_submitted));
+			}
+		}
+		function save_now() {
+			save_pending = true;
+			has_unprocessed_changes = false;
+			last_change_submitted = (new Date()).valueOf();
+
+			var xhr = new XMLHttpRequest();
+			xhr.open("POST", "../upload_data", true);
+			xhr.onload = function() {
+				if(xhr.status == 200) {
+					save_pending = false;
+					state.innerHTML = "Current";
+					state.style.background = "#080";
+					if(has_unprocessed_changes) {
+						setTimeout(save_now, update_interval);
+					}
+				}
+				else {
+					save_pending = false;
+					state.innerHTML = "Failure: #" + xhr.status;
+					state.style.background = "#800";
+					has_unprocessed_changes = true;
+					if(has_unprocessed_changes) {
+						setTimeout(save_now, update_interval);
+					}
+				}
+			};
+			xhr.onerror = function() {
+				save_pending = false;
+				state.innerHTML = "Failure";
+				state.style.background = "#800";
+				has_unprocessed_changes = true;
+				if(has_unprocessed_changes) {
+					setTimeout(save_now, update_interval);
+				}
+			}
+			var form_data = new FormData();
+			form_data.append("file_name", {{ fn | tojson }});
+			form_data.append("data", data.innerHTML);
+			xhr.send(form_data);
+		}
+
+		window.onbeforeunload = (e) => {
+			if(has_unprocessed_changes || save_pending) {
+				if(!save_pending) {
+					save_now();
+				}
+				return "Qux";
+			}
+		};
+
+		data.contentEditable = true;
+		let mo = new MutationObserver((e) => {
+			process_unsaved_changes();
+		});
+		mo.observe(data, { attributes: true, childList: true, characterData: true, subtree: true });
+	});
+</script>
+<body>
+	<div id="state">Current</div>
+	<div id="data">
+		{{ data | safe }}
+	</div>
+</body>

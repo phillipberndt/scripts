@@ -1,0 +1,19 @@
+fstore - a very simplistic file and note storage server with a command line
+client and a web interface for editing and drag & drop upload.
+
+INSTALLATION
+
+- Requires: Python with flask, requests.
+- Create credentials.py with two variables, USER and PASSWORD, for access.
+- Run fstore.py to spawn a server.
+- Make sure ./credentials.json and ./data are writeable for fstore.py.
+
+
+A WORD ON SECURITY
+
+I regard this as an experiment, not as production ready code. Please audit
+it if you intend to run it somewhere where it is publicly available. (And
+kindly let me know what you find 😃)
+
+
+See also ../zshrc/site/_fs for shell completion.

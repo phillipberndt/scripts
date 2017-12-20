@@ -1,0 +1,276 @@
+<!DOCTYPE HTML>
+<meta charset=utf8>
+<title>fstore</title>
+<style type="text/css">
+	table {
+		border-collapse: collapse;
+		margin-bottom: 1em;
+	}
+
+	table, tr, td, th {
+		border: 1px solid #777; 
+	}
+
+	td, th {
+		padding: 0.2em;
+	}
+
+	html, body {
+		min-height: 90%;
+		min-width: 90%;
+	}
+
+	.menu {
+		position: absolute;
+		border: 1px solid #000;
+		background: #eee;
+		padding: .2em;
+	}
+
+	.menu a {
+		display: block;
+	}
+</style>
+<script type="text/javascript">
+
+	window.addEventListener("load", () => {
+		var body = document.querySelector("body");
+		var files = document.getElementById("files");
+
+		function add_menu_entry(menu, entry, cb) {
+			var a = document.createElement("A");
+			a.innerText = entry;
+			if(typeof cb == "string") {
+				a.href = cb;
+			}
+			else {
+				a.href = "#";
+				a.addEventListener("click", (e) => {
+					e.preventDefault();
+					cb();
+					return false;
+				});
+			}
+			menu.appendChild(a);
+		}
+
+		function add_rb_handler(row) {
+			let link = row.querySelector("a");
+			link.addEventListener("contextmenu", (e) => {
+				var menu = document.createElement("div");
+				menu.classList.add("menu");
+				menu.style.left = (e.clientX + 5) + "px";
+				menu.style.top = (e.clientY + 5) + "px";
+
+				add_menu_entry(menu, "Open", link.href);
+
+				add_menu_entry(menu, "Delete", () => {
+					if(!confirm("Really delete " + row.dataset.fn + "?")) return;
+					fetch("delete/" + escape(row.dataset.fn), { "credentials": "include", "method": "POST" }).then((d) => {
+						row.remove();
+					});
+				});
+
+				add_menu_entry(menu, "Rename", () => {
+					let new_name = prompt("New name", row.dataset.fn);
+					if(new_name) {
+						let data = new FormData();
+						data.append("from", row.dataset.fn);
+						data.append("to", new_name);
+						fetch("rename", { "method": "POST", "body": data, "credentials": "include" }).then((d) => {
+							row.dataset.fn = new_name;
+							link.href = link.href.match(/.+\//)[0] + new_name;
+							link.innerText = new_name;
+						});
+					}
+				});
+
+				document.body.appendChild(menu);
+
+				setTimeout(() =>
+					document.addEventListener("click", (f) => {
+						menu.remove();
+					}, true), 500);
+
+				e.preventDefault();
+				return false;
+			});
+		}
+
+		for(let node of files.querySelectorAll("tr")) {
+			if(typeof node.dataset.fn != "undefined") {
+				add_rb_handler(node);
+			}
+		}
+
+		function new_file(fn) {
+			var tr = document.createElement("tr");
+			tr.dataset.fn = fn;
+
+			var td1 = document.createElement("td");
+			var a = document.createElement("a");
+			a.setAttribute("href", "f/" + escape(fn));
+			a.innerText = fn;
+			td1.appendChild(a);
+			tr.appendChild(td1);
+
+			var td2 = document.createElement("td");
+			td2.innerText = "-";
+			tr.appendChild(td2);
+
+			var tbody = files.querySelector("tbody");
+			if(tbody.firstChild) {
+				tbody.insertBefore(tr, tbody.firstChild);
+			}
+			else {
+				tbody.appendChild(tr);
+			}
+
+			add_rb_handler(tr);
+
+			return tr;
+		}
+
+		function find_file(fn) {
+			for(let node of files.querySelectorAll("tr")) {
+				if(node.dataset.fn == fn) {
+					return node;
+				}
+			}
+		}
+
+		function gen_fn(fn) {
+			if(!find_file(fn)) return fn;
+
+			var components = fn.split(/\./);
+			if(components.length > 1) {
+				var ext = components.splice(-1);
+				fn = components.join(".");
+			}
+			else {
+				var ext = null;
+			}
+
+			var ctr = 1;
+
+			while(true) {
+				var test_fn = fn + " (" + ctr + ")." + ext;
+				if(!find_file(test_fn)) return test_fn;
+				ctr++;
+			}
+		}
+
+		var _xhr_lock = [];
+		function xhr_process(action) {
+			if(typeof action == "undefined") {
+				_xhr_lock.shift();
+				if(_xhr_lock.length > 0) {
+					_xhr_lock[0]();
+				}
+			}
+			else {
+				_xhr_lock.push(action);
+				if(_xhr_lock.length == 1) {
+					action();
+				}
+			}
+		}
+
+		function upload(file) {
+			var target_fn = gen_fn(file.name);
+			var file_slot = new_file(target_fn);
+
+			var progress = document.createElement("div");
+			progress.innerHTML = "<span><progress>0%</progress></span>";
+			file_slot.querySelector("td").appendChild(progress);
+
+			var xhr = new XMLHttpRequest();
+			xhr.open("POST", "upload", true);
+			xhr.onload = function() {
+				progress.querySelector("span").innerHTML = "done";
+				setTimeout(function() {
+					progress.remove();
+				}, 5000);
+				xhr_process();
+			};
+			xhr.upload.onprogress = function(e) {
+				var percent = 100 * e.loaded / e.total;
+				progress.querySelector("span").innerHTML = "<progress value=" + (percent / 100) + ">" + Math.round(percent, 2) + "%</progress>";
+			}
+			xhr.onerror = function() {
+				progress.querySelector("span").innerHTML = "failed";
+				xhr_process();
+			}
+			var data = new FormData();
+			data.append("file", file, target_fn);
+			data.append("upload", "Upload");
+			xhr_process(function() {
+				xhr.send(data);
+			});
+		}
+
+		body.addEventListener("drop", function(e) {
+			e.stopPropagation();
+			e.preventDefault();
+			var files = e.dataTransfer.files;
+			for(var i=0; i<files.length; i++) {
+				upload(files[i]);
+			}
+		});
+
+		body.addEventListener("dragover", function(e) {
+			e.stopPropagation();
+			e.preventDefault();
+			e.dataTransfer.dropEffect = "copy";
+		});
+
+		let note_link = body.querySelector("#new_note");
+		note_link.addEventListener("click", (e) => {
+			e.preventDefault();
+			let name = prompt("Name", note_link.href.match(/e\/(.+)\.note/)[1]);
+			if(name) {
+				document.location = "e/" + escape(name) + ".note";
+			}
+			return false;
+		});
+
+		if(!document.cookie.match(/fstore-cookie/)) {
+			perm_auth = document.createElement("A");
+			perm_auth.href = "#";
+			perm_auth.innerHTML = "Store authentication cookie";
+			document.body.appendChild(perm_auth);
+			perm_auth.addEventListener("click", (e) => {
+				e.preventDefault();
+
+				let name = prompt("Please give this device a name:");
+				if(name) {
+					var data = new FormData();
+					data.append("name", name);
+					fetch("perm-auth", { "method": "POST", "body": data, "credentials": "include" }).then((d) => {
+						perm_auth.remove();
+					});
+				}
+
+				return false;
+			});
+		}
+	});
+</script>
+<body>
+	<h1>fstore</h1>
+	<table id="files">
+		<thead>
+			<th>File name</th><th>Modification date</th></tr>
+		</thead>
+		<tbody>
+			{% for file in files %}
+			<tr data-fn="{{file.name}}"><td><a href="{% if file.name.endswith(".note") %}e{% else %}f{% endif %}/{{file.name}}">{{ file.name }}</a></td><td>{{ file.mod_time_str }}</td></tr>
+			{% endfor %}
+		</tbody>
+	</table>
+	<form method="POST" enctype="multipart/form-data" action="upload">
+		<input type="file" name="file"> <input type=submit>
+	</form>
+	<a href="e/{{ new_note_name }}.note" id="new_note">New note</a>
+	<a href="fs">Client</a>
+</body>

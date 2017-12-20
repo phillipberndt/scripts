@@ -1,0 +1,57 @@
+#compdef fs
+#
+# zsh completion for fstore client
+
+_fs_remote_file() {
+	fs ls | while read _D _T _N; do
+		_wanted 'file' expl 'remote file' compadd -- $_N
+	done
+}
+
+_fs_local_file() {
+	_files -g '*'
+}
+
+_fs() {
+	local -a _1st_arg
+	_1st_arg=(
+		"ls:List files"
+		"get:Retrieve a file"
+		"put:Store a file"
+		"edit:Edit a file in place"
+		"cat:Pipe a file to stdout"
+		"mv:Rename a file"
+		"rm:Remove a file"
+	)
+
+	_arguments '*:: :->subcmds' && return 0
+
+	if (( CURRENT == 1 )); then
+		_describe -t commands "fs commands" _1st_arg -V1
+		return
+	fi
+
+	case "$words[1]" in
+		get)
+			_arguments :remote:_fs_remote_file :local:_fs_local_file
+			;;
+		put)
+			_arguments :local:_fs_local_file :remote:_fs_remote_file
+			;;
+		edit)
+			_arguments :remote:_fs_remote_file
+			;;
+		cat)
+			_arguments :remote:_fs_remote_file
+			;;
+		rm)
+			_arguments :remote:_fs_remote_file
+			;;
+		mv)
+			_arguments :remote:_fs_remote_file :local:_fs_remote_file
+			;;
+	esac
+	return 1
+}
+
+_fs "$ q"

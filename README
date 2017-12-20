@@ -52,6 +52,11 @@ Contents:
   A simple pygtk script that displays a list of all currently defined Unicode
   emoji and lets the user select one, which is then copied into the clipboard.
 
+* fstore
+
+  A very simplistic file and note storage server with a command line
+  client and a web interface for editing and drag & drop upload.
+
 * gdo
 
   find(1)-like utility with support for
