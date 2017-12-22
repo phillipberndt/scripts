@@ -138,8 +138,14 @@ if __name__ == "__main__":
         except:
             pass
         subprocess.call([ os.environ.get("EDITOR", "vim"), temp_file.name ])
-        temp_file.file.seek(0)
-        put_file(sys.argv[2], temp_file.file)
+        while True:
+            try:
+                temp_file.file.seek(0)
+                put_file(sys.argv[2], temp_file.file)
+                break
+            except:
+                print("Failed to upload file from %s. Press <enter> to retry." % (sys.argv[2],))
+
     else:
         print("No such action.")
         help()
