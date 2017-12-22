@@ -9,9 +9,10 @@
 import PIL.Image
 import PIL.ImageDraw
 import os
-import subprocess
 import random
 import re
+import subprocess
+import sys
 import time
 try:
     import cStringIO as StringIO
@@ -56,8 +57,11 @@ if not os.path.isdir(cachedir):
     os.mkdir(cachedir)
 
 imgdir = os.path.expanduser("~/.bg/")
-randr = os.popen("xrandr -q").read()
+randr = os.popen("xrandr").read()
 screens = [ [ int(x) for x in y ] for y in re.findall(" connected.* ([0-9]+)x([0-9]+)\+([0-9]+)", randr) ]
+
+if not screens:
+    sys.exit(0)
 
 images = random.sample([ x for x in os.listdir(imgdir) if x.lower()[-3:] in ("jpg", "png") ], len(screens))
 
@@ -111,7 +115,8 @@ for no in range(len(screens)):
 
         if CAN_DO_GRADIENTS:
             np_img = np.array(image)
-            sample_size = .25 * min(np_img.shape[:2])
+            sample_size = int(.25 * min(np_img.shape[:2]))
+            np_img = np_img[:, :, :3]
             top_left_avg = np.apply_over_axes(np.mean, np_img[:sample_size, :sample_size], [0, 1]).reshape(3)
             top_right_avg = np.apply_over_axes(np.mean, np_img[-sample_size:, :sample_size], [0, 1]).reshape(3)
             btm_left_avg = np.apply_over_axes(np.mean, np_img[:sample_size, -sample_size:], [0, 1]).reshape(3)
