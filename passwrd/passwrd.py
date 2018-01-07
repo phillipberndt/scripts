@@ -191,6 +191,13 @@ if __name__ == "__main__":
 	# Then ask the user
 	search = ask("Enter search string", "Which password do you want?", guess)
 
+	# Check if he requested only a part
+	partial = re.search("\(([0-9]+)\)\s*$", search)
+	if partial:
+		search = search[:-len(partial.group(0))].strip()
+		partial = int(partial.group(1))
+		print("Partial search: Partial %d, rest %s" % (partial, search))
+
 	# Then do the search
 	for description, password in pw_data:
 		if re.search(search, description, re.I):
@@ -209,6 +216,12 @@ if __name__ == "__main__":
 	if not pass_text:
 		error_message("Failed to find a password.")
 	else:
+		if partial:
+			try:
+				pass_text = pass_text.split()[partial-1].strip()
+			except:
+				error_message("Password has no part %d." % partial)
+				sys.exit(1)
 		# Send keyboard events
 		time.sleep(0.1)
 		send_string(focus_widget, pass_text)
