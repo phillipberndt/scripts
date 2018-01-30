@@ -33,6 +33,9 @@ setopt extendedglob
 setopt null_glob
 setopt nomatch
 
+# No bells
+unsetopt beep
+
 # No history
 unset HISTFILE
 

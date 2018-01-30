@@ -28,6 +28,11 @@ Contents:
   use apt-file to find the related package, install it, and iterate
   until the build succeeds.
 
+* bell
+
+  A tiny X11 tool running a command every time a bell is rang. I use this
+  to flash my notebook's LCD brightness.
+
 * check_integrity
 
   Basic, non-hack-proof system integrity checker informing root about
