@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+import ctypes
+import re
+import subprocess
+import sys
+import tempfile
+
+if len(sys.argv) != 2:
+    print("Syntax: errno <errno or string>")
+    sys.exit(1)
+
+preproc = tempfile.NamedTemporaryFile()
+preproc.write(b"#include <errno.h>")
+preproc.flush()
+header = subprocess.check_output(["cpp", "-fdirectives-only", preproc.name]).decode()
+
+def print_info(errno):
+    std = ctypes.CDLL(None)
+    std.strerror.restype = ctypes.c_char_p
+    errdesc = std.strerror(errno).decode()
+
+    definitions = re.findall("(?m)#define\s+(E\w+)\s+%d\s*$" % errno, header)
+
+    print("errno:       %d" % errno)
+    print("strerror:    %s" % errdesc)
+    print("definitions: %s" % ", ".join(definitions))
+    print()
+
+if sys.argv[1][0].isdigit():
+    errno = int(sys.argv[1])
+    print_info(errno)
+else:
+    for name, no in re.findall("(?m)#define\s+(E\w+)\s+([0-9]+)\s*$", header):
+        if sys.argv[1].lower() in name.lower():
+            print_info(int(no))
