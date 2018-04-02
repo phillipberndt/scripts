@@ -24,6 +24,7 @@ import mimetypes
 import os
 import pty
 import re
+import select
 import shutil
 import signal
 import socket
@@ -39,6 +40,7 @@ import traceback
 import urllib
 import urlparse
 import uuid
+import xml.dom.minidom
 
 from wsgiref.handlers import format_date_time
 from functools import partial
@@ -642,7 +644,7 @@ if has_gzip:
 
 class EmbedLivereloadWrapper(io.IOBase):
     "Wrapper around a HTML file that embeds a LiveReload JS into the file"
-    EMBED_CODE = """<script>document.write('<script src="/.live-reload/lr.js"><' + '/script>');</script>"""
+    EMBED_CODE = """<script>document.write('<script src="/.well-known/live-reload/lr.js"><' + '/script>');</script>"""
 
     def __init__(self, fileobj):
         self.fileobj = fileobj
@@ -830,7 +832,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 }
             }
             var urls_str = urls.join("&");
-            var evt = new EventSource("/.live-reload/feed?" + urls_str);
+            var evt = new EventSource("/.well-known/live-reload/feed?" + urls_str);
             evt.onmessage = function(msg) {
                 var cmp = encodeURIComponent(msg.data);
                 for(var url of urls) {
@@ -1275,7 +1277,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     continue
                 absname = os.path.join(self.mapped_path, name)
                 if os.path.isdir(absname):
-                    dirs.append("<li><img src='/.directory-icons/inode-directory' alt='directory'> <a href='%s/'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
+                    dirs.append("<li><img src='/.well-known/directory-icons/inode-directory' alt='directory'> <a href='%s/'>%s</a> <em>Folder</em></li>" % (xml_escape(os.path.join(base, name)), xml_escape(name)))
                 else:
                     try:
                         file_mime_type = mimetypes.guess_type(absname)[0] or "application/octet-stream"
@@ -1283,7 +1285,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     except:
                         size = 0
                         file_mime_type = "application/octet-stream"
-                    files.append("<li><img src='/.directory-icons/%s' alt='%s'> <a href='%s'>%s</a> <em>%s</em></li>" % (file_mime_type.replace("/", "-"), file_mime_type, xml_escape(os.path.join(base, name)), xml_escape(name), size))
+                    files.append("<li><img src='/.well-known/directory-icons/%s' alt='%s'> <a href='%s'>%s</a> <em>%s</em></li>" % (file_mime_type.replace("/", "-"), file_mime_type, xml_escape(os.path.join(base, name)), xml_escape(name), size))
 
             data += dirs
             data += files
@@ -1471,10 +1473,125 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         "Check if a file should be served as a CGI file"
         return "allow_cgi" in self.options and self.options["allow_cgi"] and os.path.isfile(mapped_path) and (os.path.splitext(mapped_path)[-1][1:] in self.options["cgi_handlers"] or os.access(mapped_path, os.X_OK))
 
+    def handle_dlna(self):
+        """Handle a request for dlna related stuff"""
+        if self.path.startswith("/.well-known/dlna/description.xml"):
+            self.reply_with_file_like_object(StringIO.StringIO("""<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0"><specVersion><major>1</major><minor>0</minor></specVersion>
+                <device><deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType><friendlyName>iwebd on {host}</friendlyName><serialNumber>1</serialNumber>
+                <UDN>uuid:2f71654a-4ed0-486d-96a8-5185f96dea1e</UDN><serviceList>
+                <service><serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType><serviceId>urn:upnp-org:serviceId:ContentDirectory</serviceId><SCPDURL>/.well-known/dlna/cds.xml</SCPDURL>
+                <controlURL>/.well-known/dlna/control/cds</controlURL><eventSubURL>/.well-known/dlna/event/cds</eventSubURL></service>
+                </serviceList></device><URLBase>http://{host}/</URLBase></root>""".format(host=self.headers["host"][0])), -1, "application/xml; charset=utf8", "200 Ok")
+            return
+
+        if self.path.startswith("/.well-known/dlna/cds.xml"):
+            self.reply_with_file_like_object(StringIO.StringIO("""<?xml version="1.0" encoding="utf-8"?><scpd xmlns="urn:schemas-upnp-org:service-1-0">
+                    <specVersion> <major>1</major> <minor>0</minor> </specVersion> <actionList> <action> <name>Browse</name> <argumentList> <argument> <name>ObjectID</name> <direction>in</direction>
+                    <relatedStateVariable>A_ARG_TYPE_ObjectID</relatedStateVariable> </argument> <argument> <name>BrowseFlag</name> <direction>in</direction> <relatedStateVariable>A_ARG_TYPE_BrowseFlag</relatedStateVariable>
+                    </argument> <argument> <name>Filter</name> <direction>in</direction> <relatedStateVariable>A_ARG_TYPE_Filter</relatedStateVariable> </argument> <argument> <name>StartingIndex</name> <direction>in</direction>
+                    <relatedStateVariable>A_ARG_TYPE_Index</relatedStateVariable> </argument> <argument> <name>RequestedCount</name> <direction>in</direction> <relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable> </argument>
+                    <argument> <name>SortCriteria</name> <direction>in</direction> <relatedStateVariable>A_ARG_TYPE_SortCriteria</relatedStateVariable> </argument> <argument> <name>Result</name> <direction>out</direction>
+                    <relatedStateVariable>A_ARG_TYPE_Result</relatedStateVariable> </argument> <argument> <name>NumberReturned</name> <direction>out</direction> <relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable> </argument>
+                    <argument> <name>TotalMatches</name> <direction>out</direction> <relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable> </argument> <argument> <name>UpdateID</name> <direction>out</direction>
+                    <relatedStateVariable>A_ARG_TYPE_UpdateID</relatedStateVariable> </argument> </argumentList> </action> <action> <name>GetSearchCapabilities</name> <argumentList> <argument> <name>SearchCaps</name> <direction>out</direction>
+                    <relatedStateVariable>SearchCapabilities</relatedStateVariable> </argument> </argumentList> </action> <action> <name>GetSortCapabilities</name> <argumentList> <argument> <name>SortCaps</name>
+                    <direction>out</direction> <relatedStateVariable>SortCapabilities</relatedStateVariable> </argument> </argumentList> </action> <action> <name>GetSystemUpdateID</name> <argumentList> <argument> <name>Id</name>
+                    <direction>out</direction> <relatedStateVariable>SystemUpdateID</relatedStateVariable> </argument> </argumentList> </action> </actionList> <serviceStateTable> <stateVariable sendEvents="no"> <name>A_ARG_TYPE_BrowseFlag</name>
+                    <dataType>string</dataType> <allowedValueList> <allowedValue>BrowseMetadata</allowedValue> <allowedValue>BrowseDirectChildren</allowedValue> </allowedValueList> </stateVariable> <stateVariable sendEvents="yes">
+                    <name>SystemUpdateID</name> <dataType>ui4</dataType> </stateVariable> <stateVariable sendEvents="yes"> <name>ContainerUpdateIDs</name> <dataType>string</dataType> </stateVariable> <stateVariable sendEvents="no">
+                    <name>A_ARG_TYPE_Count</name> <dataType>ui4</dataType> </stateVariable> <stateVariable sendEvents="no"> <name>A_ARG_TYPE_SortCriteria</name> <dataType>string</dataType> </stateVariable> <stateVariable sendEvents="no">
+                    <name>SortCapabilities</name> <dataType>string</dataType> </stateVariable> <stateVariable sendEvents="no"> <name>A_ARG_TYPE_Index</name> <dataType>ui4</dataType> </stateVariable> <stateVariable sendEvents="no">
+                    <name>A_ARG_TYPE_ObjectID</name> <dataType>string</dataType> </stateVariable> <stateVariable sendEvents="no"> <name>A_ARG_TYPE_UpdateID</name> <dataType>ui4</dataType> </stateVariable> <stateVariable sendEvents="no">
+                    <name>A_ARG_TYPE_Result</name> <dataType>string</dataType> </stateVariable> <stateVariable sendEvents="no"> <name>SearchCapabilities</name> <dataType>string</dataType> </stateVariable> <stateVariable sendEvents="no">
+                    <name>A_ARG_TYPE_Filter</name> <dataType>string</dataType> </stateVariable> </serviceStateTable> </scpd> """), -1, "application/xml; charset=utf8", "200 Ok")
+            return
+
+        if self.path.startswith("/.well-known/dlna/event/cds"):
+            self.send_error("200 Ok", True, "", {"Sid": "uuid:0bec14cb-4850-483c-b18a-6da73a4add75"})
+            return
+
+        if self.path.startswith("/.well-known/dlna/control/cds"):
+            if "soapaction" not in self.headers or "urn:schemas-upnp-org:service:ContentDirectory:1#Browse" not in self.headers["soapaction"][0]:
+                self.send_error("404 Not Found")
+                return
+            body = self.get_http_body_reader().read()
+            request = xml.dom.minidom.parseString(body)
+            assert request.documentElement.firstChild.firstChild.nodeName.lower().endswith("browse")
+            request_attrs = {}
+            for child in request.documentElement.firstChild.firstChild.childNodes:
+                name = child.nodeName
+                if ":" in name:
+                    name = name[name.find(":")+1:]
+                request_attrs[name] = "".join([ x.toxml() for x in child.childNodes ])
+
+            self.log(logging.DEBUG, "DLNA request with request attrs: %(attrs)r", attrs=request_attrs)
+            object_id = int(request_attrs.get("ObjectID"))
+
+            if not hasattr(HttpHandler, "_dlna_objects"):
+                HttpHandler._dlna_objects = { 0: (-1, ".") }
+                HttpHandler._dlna_inverse = { ".": 0 }
+                HttpHandler._dlna_maxkey = 0
+
+            result_elements = []
+            if object_id in HttpHandler._dlna_objects:
+                parent, base_path = HttpHandler._dlna_objects[object_id]
+                if os.path.isfile(base_path):
+                    object_id = parent
+                    parent, base_path = HttpHandler._dlna_objects[object_id]
+
+                if request_attrs.get("BrowseFlag", "BrowseMetadata") == "BrowseMetadata":
+                    contents = [""]
+                else:
+                    contents = os.listdir(base_path)
+
+                for fn in contents:
+                    path = os.path.join(base_path, fn)
+                    if os.path.isdir(path):
+                        path += "/"
+
+                    if path not in HttpHandler._dlna_inverse:
+                        HttpHandler._dlna_maxkey += 1
+                        key = HttpHandler._dlna_maxkey
+                        HttpHandler._dlna_inverse[path] = key
+                        HttpHandler._dlna_objects[key] = (object_id, path)
+                    else:
+                        key = HttpHandler._dlna_inverse[path]
+
+                    try:
+                        if os.path.isdir(path):
+                                child_count = len(os.listdir(path))
+                                result_elements.append(xml_escape('<container id="{}" parentID="{}" restricted="false" childCount="{}"><dc:title>{}</dc:title><upnp:class>object.container.storageFolder</upnp:class></container>'.format(
+                                    key, object_id, child_count, xml_escape(fn))))
+                        else:
+                            file_mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+                            result_elements.append(xml_escape('<item id="{}" parentID="{}" restricted="false"><dc:title>{}</dc:title><upnp:class>object.item.{}Item</upnp:class><res protocolInfo="http-get:*:{}:*" size="{}">http://{}/{}</res></item>'.format(
+                                key, object_id, xml_escape(fn), file_mime_type.split("/")[0], file_mime_type, os.stat(path).st_size, xml_escape(self.headers["host"][0]), xml_escape(urllib.quote(path)))))
+                    except OSError:
+                        pass
+
+
+            count = int(request_attrs.get("RequestedCount", "99999")) or 9999
+            start = int(request_attrs.get("StartingIndex", 0))
+            filtered_results = result_elements[start:start+count]
+
+            result = ['<?xml version="1.0" encoding="utf-8" standalone="yes"?>',
+                      '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:BrowseResponse xmlns:u="urn:schemas-upnp-org:service:ContentDirectory:1"><Result>']
+            result.append(xml_escape('<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">'))
+            result += filtered_results
+
+            result.append(xml_escape('</DIDL-Lite>'))
+            result.append('</Result><NumberReturned>{}</NumberReturned><TotalMatches>{}</TotalMatches><UpdateID>0</UpdateID></u:BrowseResponse></s:Body></s:Envelope>'.format(len(filtered_results), len(result_elements)))
+            out = "".join(result)
+
+            self.reply_with_file_like_object(StringIO.StringIO(out), len(out), "text/xml; charset=UTF-8", "200 OK", {"Ext": "", "Connection": "close", "Server": "Linux/4.10.0-40-generic, UPnP/1.0, MediaTomb/0.12.2"})
+            return
+
+        self.send_error("404 Not Found")
+        return
+
     def handle_live_reload(self):
-        """Handle a request for live-reload related stuff (js file and websocket protocol)
-        """
-        if self.path.startswith("/.live-reload/feed"):
+        """Handle a request for live-reload related stuff (js file and websocket protocol)"""
+        if self.path.startswith("/.well-known/live-reload/feed"):
             # Home-brew simplified live reload protocol
             urls = None
             if "?" in self.path:
@@ -1502,7 +1619,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     break
             live_reload_remove(_handle)
             self.send_error("400 Bad request", force_close=True)
-        elif self.path == "/.live-reload/lr.js":
+        elif self.path == "/.well-known/live-reload/lr.js":
             self.reply_with_file_like_object(StringIO.StringIO(self.LIVE_RELOAD_JS), -1, "application/javascript", "200 Ok")
             return
         self.send_error("404 Not found")
@@ -1632,7 +1749,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             if not self.handle_authentication(self.options["user"], self.options["pass"]):
                 return
 
-        if self.path.startswith("/.directory-icons/"):
+        if self.path.startswith("/.well-known/directory-icons/"):
             load_icon = self.path[18:]
             output = StringIO.StringIO()
             def send_data(buf, data=None):
@@ -1648,8 +1765,12 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self.reply_with_file_like_object(output, output.pos, "image/png", "200 Ok", { "Cache-Control": "public, max-age=31104000" })
             return
 
-        if self.path.startswith("/.live-reload/") and self.options["live_reload_enabled"]:
+        if self.path.startswith("/.well-known/live-reload/") and self.options["live_reload_enabled"]:
             self.handle_live_reload()
+            return
+
+        if self.path.startswith("/.well-known/dlna/") and self.options["dlna"]:
+            self.handle_dlna()
             return
 
         self.path_info = ""
@@ -2100,6 +2221,10 @@ def xml_escape(string):
     "Escape special XML/HTML characters"
     return string.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&apos;")
 
+def xml_unescape(string):
+    "Unescape special XML/HTML characters"
+    return string.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&apos;", "'")
+
 def format_size(size):
     "Format a human-readable file size"
     prefix = ""
@@ -2388,6 +2513,8 @@ def autoreload(main_pid, watch_file_name):
     logger.info("autoreload active")
     notifier.loop()
 
+_iterate_interfaces_lock = threading.Lock()
+
 def iterate_interfaces():
     if not hasattr(libc, "getifaddrs"):
         return
@@ -2418,6 +2545,59 @@ def iterate_interfaces():
         yield if_name, ip
     libc.freeifaddrs(ifap)
 
+def dlna_handler(ips, name, additional_options, port, avahi_name_http, avahi_name_webdav):
+    announcements = [
+        "\r\n".join(["CACHE-CONTROL: max-age=1800", "LOCATION: http://{ip}:{port}/.well-known/dlna/description.xml",
+            "NT: urn:schemas-upnp-org:service:ContentDirectory:1", "SERVER: UPnP/1.0, iwebd",
+            "USN: uuid:2f71654a-4ed0-486d-96a8-5185f96dea1e::urn:schemas-upnp-org:service:ContentDirectory:1", "", ""]),
+        "\r\n".join(["CACHE-CONTROL: max-age=1800", "LOCATION: http://{ip}:{port}/.well-known/dlna/description.xml",
+            "NT: urn:schemas-upnp-org:service:MediaServer:1", "SERVER: UPnP/1.0, iwebd",
+            "USN: uuid:2f71654a-4ed0-486d-96a8-5185f96dea1e::urn:schemas-upnp-org:service:MediaServer:1", "", ""]),
+        "\r\n".join(["CACHE-CONTROL: max-age=1800", "LOCATION: http://{ip}:{port}/.well-known/dlna/description.xml",
+            "NT: uuid:2f71654a-4ed0-486d-96a8-5185f96dea1e", "SERVER: UPnP/1.0, iwebd",
+            "USN: uuid:2f71654a-4ed0-486d-96a8-5185f96dea1e", "", ""]),
+        "\r\n".join(["CACHE-CONTROL: max-age=1800", "LOCATION: http://{ip}:{port}/.well-known/dlna/description.xml",
+            "NT: upnp:rootdevice", "SERVER: UPnP/1.0, iwebd",
+            "USN: uuid:2f71654a-4ed0-486d-96a8-5185f96dea1e::upnp:rootdevice",
+            "OPT: \"http://schemas.upnp.org/upnp/1/0/\"; ns=01", "", ""]),
+    ]
+    ifsocks = {}
+
+    for ip in ips:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+        for announcement in announcements:
+            announcement = "NOTIFY * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nNTS: ssdp:alive\r\n" + announcement
+            sock.sendto(announcement.format(ip=ip, port=port[1]), ("239.255.255.250", 1900))
+
+    for ip in ips:
+        if ":" in ip:
+            continue
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+        sock.bind(("239.255.255.250", 1900))
+        sock.setsockopt(socket.SOL_IP, socket.IP_MULTICAST_IF, socket.inet_aton(ip))
+        mreq = socket.inet_aton("239.255.255.250") + socket.inet_aton(ip)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        ifsocks[sock] = ip
+
+    log = logging.getLogger()
+
+    while ifsocks:
+        readable, _, _ = select.select(list(ifsocks.keys()), [], [], 9999)
+        for sock in readable:
+            dgram, addr = sock.recvfrom(10240)
+            if not dgram:
+                del ifsocks[sock]
+
+            if dgram.startswith("M-SEARCH"):
+                log.debug("Replying to M-SEARCH from %s" % (addr,))
+                for announcement in announcements:
+                    r_announcement = "HTTP/1.1 200 OK\r\nExt: \r\n" + announcement
+                    sock.sendto(r_announcement.format(ip="192.168.0.3", port=port[1]).replace("NT:", "ST:"), addr)
+
 def main():
     user = False
     password = False
@@ -2441,6 +2621,7 @@ def main():
         parser.add_argument("--ssl-key", help="Use a custom SSL keyfile (Default: Auto-generated)", metavar="file")
     if has_pyinotify:
         parser.add_argument("--live-reload", action="store_true", help="Activate a live-reload server in httpd (with transparent JS injection)")
+    parser.add_argument("--dlna", action="store_true", help="Announce the httpd via dlna/UPnP")
     parser.add_argument("--help", action="help", help="Display this help")
     parser.add_argument("--root", help="root directory to serve from", metavar="directory")
     options = vars(parser.parse_args(sys.argv[1:]))
@@ -2475,6 +2656,7 @@ def main():
         "allow_cgi": options["c"],
         "cgi_handlers": cgi_handlers,
         "alpn_protocols": None,
+        "dlna": options["dlna"],
     }
 
     script_file_name = os.path.abspath(__file__)
@@ -2519,6 +2701,12 @@ def main():
             if options["d"]:
                 user = user or "anonymous"
                 create_avahi_group(avahi_name_webdav, httpd_port[1], [ "u=%s" % user, "path=/" ])
+
+    if options["dlna"] and http_variants:
+        dlna_thread = threading.Thread(target=dlna_handler, args=[ [x[1] for x in iterate_interfaces() ] ] + list(http_variants[0]))
+        dlna_thread.daemon = True
+        dlna_thread.start()
+        extra_thread_count += 1
 
     if options["f"] is not False:
         server, ftpd_port = setup_tcp_server(FtpHandler, options["f"] or ("", default_port("ftpd")), server_options)
