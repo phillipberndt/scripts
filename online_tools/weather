@@ -1,0 +1,3 @@
+#!/bin/bash
+CITY=$(curl -s ifconfig.co/json | sed -re 's#.+"city":"(.+)".+#\1#')
+curl -s wttr.in/$CITY

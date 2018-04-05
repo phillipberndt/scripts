@@ -1,0 +1,4 @@
+#!/bin/bash
+echo -n "Port ${1:-80}: "
+curl -s ifconfig.co/port/${1:-80}
+echo
