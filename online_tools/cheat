@@ -1,0 +1,3 @@
+#!/bin/sh
+# Cheat sheet lookup
+curl cheat.sh/${1}
