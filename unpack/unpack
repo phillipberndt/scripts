@@ -17,6 +17,8 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 29.04.2018
+#    Fix debian packages (control.tar.* support)
 #  - 06.10.2016
 #    Support paxel in addition to axel
 #  - 04.10.2016
@@ -280,6 +282,13 @@ class DEBFile(filetype): # {{{
 		elif dataFile[-3:] == "bz2": compressionFlag = "-j"
 		elif dataFile[-2:] == "gz": compressionFlag = "-z"
 		elif dataFile[-2:] == "xz": compressionFlag = "--xz"
+		controlFile = os.popen("ar t '%s' | grep -E '^control.tar'" % cls.file.replace("'", r"\'")).read().strip()
+		controlCompressionFlag = ""
+		if controlFile[-4:] == "lzma": controlCompressionFlag = "--lzma"
+		elif controlFile[-3:] == "bz2": controlCompressionFlag = "-j"
+		elif controlFile[-2:] == "gz": controlCompressionFlag = "-z"
+		elif controlFile[-2:] == "xz": controlCompressionFlag = "--xz"
+
 		if answer == 0:
 			# Unpack data archive
 			return os.system("ar p %s %s | tar x %s -C %s" % (se(cls.file), dataFile, compressionFlag, se(destination))) == 0
@@ -287,8 +296,8 @@ class DEBFile(filetype): # {{{
 			# Unpack data & control archive
 			return os.system(
 				("(ar p %s %s | tar x %s -C %s) && (mkdir %s/DEBIAN && "
-				 "ar p %s control.tar.gz | tar zx -C %s/DEBIAN)") %
-					(se(cls.file), dataFile, compressionFlag, se(destination), se(destination), se(cls.file),
+				 "ar p %s %s | tar x %s -C %s/DEBIAN)") %
+					(se(cls.file), dataFile, compressionFlag, se(destination), se(destination), se(cls.file), se(controlFile), se(controlCompressionFlag),
 					se(destination))) == 0
 		elif answer == 2:
 			# Unpack the ar-archive only
