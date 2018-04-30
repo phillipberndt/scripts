@@ -244,6 +244,48 @@ class NetworkThroughput(OnEvent):
                 if throughput < self.threshold:
                     break
 # }}}
+# Disk I/O {{{
+class DiskIO(OnEvent):
+    DESCRIPTION = "Disk I/O throughput drops below a threshold"
+    PREFIX = "diskio"
+    PARAMETER_DESCRIPTION = "kiB/s"
+    SUPPORTS_NEGATE = True
+
+    @staticmethod
+    def get_bytes():
+        grid = [ x.split() for x in open("/proc/diskstats").readlines() ]
+        #        sectors read  /    written, sector size is fixed 2**9
+        return sum(( int(x[5]) + int(x[9]) for x in grid )) * 512
+
+    def get_throughput(self):
+        now = time.time()
+        nbytes = self.get_bytes()
+        throughput = (nbytes - self.nbytes) / (now - self.time)
+        self.time = now
+        self.nbytes = nbytes
+        return throughput
+
+    def setup(self):
+        self.threshold = float(self.parameter) * 1024
+
+    def initialize(self):
+        self.nbytes = DiskIO.get_bytes()
+        self.time = time.time()
+        time.sleep(1)
+        status(0, self.PREFIX, "Startup throughput is %2.2f kiB/s" % (self.get_throughput() / 1024, ))
+
+    def wait_for_event(self):
+        while True:
+            time.sleep(10)
+            throughput = self.get_throughput()
+            status(0, self.PREFIX, "Throughput is %2.2f kiB/s" % (throughput / 1024, ), True)
+            if self.negate_condition:
+                if throughput >= self.threshold:
+                    break
+            else:
+                if throughput < self.threshold:
+                    break
+# }}}
 # Ping {{{
 class Pingable(OnEvent):
     DESCRIPTION = "Host replies to ping"
