@@ -85,7 +85,7 @@ bpath() {
 	local VARIABLES SEARCH_DEPTH VERBOSE ACTION OPTION VALUE ENAME ARCH
 
 	VARIABLES_OVERRIDDEN=0
-	VARIABLES=PATH:CPATH:LD_LIBRARY_PATH:LIBRARY_PATH:PKG_CONFIG_PATH:XDG_DATA_DIRS:DYLD_LIBRARY_PATH
+	VARIABLES=PATH:CPATH:LD_LIBRARY_PATH:LIBRARY_PATH:PKG_CONFIG_PATH:XDG_DATA_DIRS:DYLD_LIBRARY_PATH:CMAKE_PREFIX_PATH
 	SEARCH_DEPTH=3
 	VERBOSE=0
 	ACTION=env
@@ -173,6 +173,7 @@ bpath() {
 			mkdir $BASE_DIRECTORY/share
 			_bpath_add_path XDG_DATA_DIRS $BASE_DIRECTORY/share
 		fi
+		_bpath_add_path CMAKE_PREFIX_PATH $BASE_DIRECTORY
 		return 0
 	fi
 
@@ -187,7 +188,6 @@ bpath() {
 		fi
 		if [ ${VARIABLES_ARRAY[(i)CPATH]} -le ${#VARIABLES_ARRAY} ]; then
 			_bpath_add_path CPATH $BASE_DIRECTORY/include
-			_bpath_auto_add_path_recursive CPATH $BASE_DIRECTORY/include -mindepth 1 -maxdepth $SEARCH_DEPTH "(" -name "*.h" -o -type d ")"
 		fi
 		if [ ${VARIABLES_ARRAY[(i)LIBRARY_PATH]} -le ${#VARIABLES_ARRAY} ]; then
 			_bpath_auto_add_path_recursive LIBRARY_PATH $BASE_DIRECTORY/lib -maxdepth $SEARCH_DEPTH "(" -regex ".+\\.so\\(\\.[0-9\\.-]+\\)?" -o -name "*.a" -o -name "*.la" ")"
@@ -201,9 +201,12 @@ bpath() {
 		if [ ${VARIABLES_ARRAY[(i)XDG_DATA_DIRS]} -le ${#VARIABLES_ARRAY} ]; then
 			_bpath_add_path XDG_DATA_DIRS $BASE_DIRECTORY/share
 		fi
+		if [ ${VARIABLES_ARRAY[(i)CMAKE_PREFIX_PATH]} -le ${#VARIABLES_ARRAY} ]; then
+			_bpath_add_path CMAKE_PREFIX_PATH $BASE_DIRECTORY
+		fi
 
 		for ENAME in $VARIABLES_ARRAY; do
-			KNOWN_VARIABLES=(PATH CPATH LIBRARY_PATH LD_LIBRARY_PATH PKG_CONFIG_PATH XDG_DATA_DIRS)
+			KNOWN_VARIABLES=(PATH CPATH LIBRARY_PATH LD_LIBRARY_PATH PKG_CONFIG_PATH XDG_DATA_DIRS CMAKE_PREFIX_PATH)
 			if [ ${KNOWN_VARIABLES[(i)${(q)ENAME}]} -gt ${#KNOWN_VARIABLES} ]; then
 				echo "Don't know how to handle $ENAME in a /usr-like directory structure." >&2
 				echo "Please specify \`find' parameters explicitly." >&2
