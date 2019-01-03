@@ -114,8 +114,10 @@ try:
     libc.sendfile.restype = ctypes.c_ssize_t
     libc.sendfile.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_voidp, ctypes.c_size_t)
     libc.strerror.restype = ctypes.c_char_p
+    libc.getnameinfo.argtypes = (ctypes.c_voidp, ctypes.c_size_t, ctypes.c_voidp, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t, ctypes.c_int)
     has_ctypes = True
 except:
+    libc = None
     has_ctypes = False
 
 class SSLKey(object):
@@ -2539,7 +2541,7 @@ def iterate_interfaces():
         if addr_type not in (2, 10):
             ptr = ctypes.cast(ptr.contents.ifa_next, ptype)
             continue
-        libc.getnameinfo(ptr.contents.ifa_addr, 16 if addr_type == 2 else 30, addr, 255, 0, 0, 1)
+        libc.getnameinfo(ptr.contents.ifa_addr, 16 if addr_type == 2 else 30, addr, 255, ctypes.cast(0, ctypes.c_char_p), 0, 1)
         ip = addr.value
         ptr = ctypes.cast(ptr.contents.ifa_next, ptype)
         yield if_name, ip
