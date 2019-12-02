@@ -17,6 +17,7 @@ else
 		zgen load Tarrasch/zsh-autoenv # .autoenv.zsh USE autostash !!
 		zgen load rimraf/k # k
 		zgen load chrissicool/zsh-256color
+		zgen load greymd/tmux-xpanes
 		zgen oh-my-zsh themes/gentoo
 		zgen load oz/safe-paste
 		zgen save
