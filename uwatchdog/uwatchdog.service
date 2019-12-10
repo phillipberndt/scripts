@@ -1,0 +1,10 @@
+[Unit]
+Description=Micro Watchdog
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/uwatchdog
+User=root
+
+[Install]
+WantedBy=default.target

@@ -207,6 +207,10 @@ Contents:
   Generic unpacker for a variety of formats. Takes care of not messing up your
   $PWD. Can download files for you.
 
+* uwatchdog
+
+  A tiny watchdog daemon.
+
 * venv
   
   A tool to setup virtual environments for more than just python. Also contains
