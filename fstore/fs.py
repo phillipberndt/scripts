@@ -1,11 +1,6 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # encoding: utf-8
-#
-# fstore client
-#
-# TODO make py3 ready (remove urllib.quote)
-#
-from __future__ import print_function
+
 
 import getpass
 import os
@@ -14,7 +9,7 @@ import socket
 import subprocess
 import sys
 import tempfile
-import urllib
+import urllib.request, urllib.parse, urllib.error
 
 TARGET_URL = "http://localhost:5000/"
 
@@ -33,7 +28,7 @@ def auth_wrapper(request_fn, *args, **kw_args):
     if response.status_code == 401:
         while response.status_code == 401:
             print("Unauthenticated.")
-            user_name = raw_input("User name: ")
+            user_name = input("User name: ")
             password = getpass.getpass()
             response = requests.post("%sperm-auth" % (TARGET_URL,), {"name": "%s@%s" % (getpass.getuser(), socket.gethostname())}, auth=(user_name, password), allow_redirects=False)
         authentication_cookie = response.cookies["fstore-cookie"]
@@ -52,7 +47,7 @@ def file_list():
         print("%s %s" % (file_obj["mod_time_str"], file_obj["name"]))
 
 def get_file(name):
-    stream = auth_wrapper(requests.get, "%sf/%s" % (TARGET_URL, urllib.quote(name)), stream=True)
+    stream = auth_wrapper(requests.get, "%sf/%s" % (TARGET_URL, urllib.parse.quote(name)), stream=True)
     assert stream.status_code == 200
     for data in stream.iter_content(1024):
         yield data
@@ -69,7 +64,7 @@ def rename_file(source_name, target_name):
     return True
 
 def unlink_file(file_name):
-    code = auth_wrapper(requests.post, "%sdelete/%s" % (TARGET_URL, urllib.quote(file_name))).status_code
+    code = auth_wrapper(requests.post, "%sdelete/%s" % (TARGET_URL, urllib.parse.quote(file_name))).status_code
     if code == 404:
         print("File not found.", file=sys.stderr)
         return False
@@ -84,7 +79,7 @@ def help():
 def ask_overwrite(name):
     while True:
         print("File %s already exists. Overwrite? " % (name,), file=sys.stderr, end="")
-        yes_no = raw_input()
+        yes_no = input()
         if not yes_no:
             continue
         if yes_no[0] == "y":
