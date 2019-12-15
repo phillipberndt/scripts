@@ -98,12 +98,12 @@ if __name__ == "__main__":
         for chunk in get_file(sys.argv[2]):
             sys.stdout.write(chunk)
     elif sys.argv[1] == "get":
-        if len(sys.argv) > 3 and sys.argv[3] != "-":
+        if len(sys.argv) > 3:
             target = sys.argv[3]
         else:
             target = os.path.basename(sys.argv[2])
         if target == "-":
-            target = sys.stdout
+            target = sys.stdout.buffer
         else:
             if os.path.isfile(target) and not ask_overwrite(target):
                 sys.exit(1)
@@ -118,7 +118,7 @@ if __name__ == "__main__":
         if sys.argv[1] == "-":
             source = sys.stdin
         else:
-            source = open(sys.argv[2])
+            source = open(sys.argv[2], "rb")
         put_file(target, source)
     elif sys.argv[1] == "mv":
         rename_file(sys.argv[2], sys.argv[3])
