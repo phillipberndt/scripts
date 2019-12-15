@@ -7,7 +7,6 @@ import json
 import mimetypes
 import os
 import re
-import uuid
 
 from flask import Flask, request, Response, send_from_directory, jsonify, helpers
 from jinja2 import Template
@@ -17,7 +16,7 @@ app = Flask(__name__)
 from credentials import USER, PASSWORD
 
 def new_auth_token(name=None):
-    new_creds = str(uuid.uuid4())
+    new_creds = base64.b64encode(os.urandom(50)).decode()
     if name is None:
         name = "Credentials generated on %s" % datetime.datetime.now().strftime("%Y-%m-%d")
     with open("credentials.json", "a") as credentials_file:
