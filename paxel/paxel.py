@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # encoding: utf-8
 """
     pAxel - python axel(1) like program
@@ -29,7 +29,7 @@
     that is unequal to the length of the data passed to the callback, a download
     is aborted.
 """
-from __future__ import print_function
+
 import argparse
 import pickle
 
@@ -187,7 +187,7 @@ def header_callback(state, request_range, download, data):
             # (Reply 213 followed by bytes is a good guess though.)
             dl_state["range_ok"] = True
         else:
-            data = data.lower()
+            data = data.lower().decode()
             if "content-range" in data:
                 dl_state["range_ok"] = True
 
@@ -231,7 +231,7 @@ class StateShelf(object):
         self._file_name = file_name
 
         if os.path.isfile(file_name):
-            self._persist.update(pickle.load(open(file_name)))
+            self._persist.update(pickle.load(open(file_name, "rb")))
 
 
     def __getitem__(self, name):
@@ -264,12 +264,12 @@ class StateShelf(object):
             self.sync()
 
 
-    def __nonzero__(self):
+    def __bool__(self):
         return bool(self._locals) or bool(self._persist)
 
 
     def update(self, dictionary):
-        for key, value in dictionary.items():
+        for key, value in list(dictionary.items()):
             self[key] = value
 
 
@@ -326,7 +326,7 @@ def create_output_file(state):
                 counter += 1
             file_name = "%s.%d%s" % (base, counter, ext)
 
-    state["fd"] = open(file_name, "w")
+    state["fd"] = open(file_name, "wb")
     state["target_file"] = file_name
 
     if "file_size" in state and state["file_size"]:
@@ -385,7 +385,7 @@ def update_progress(state):
                 output.append("-")
             else:
                 # Is the beginning of a chunk contained in this part?
-                for download, dl_state in state["parts"].items():
+                for download, dl_state in list(state["parts"].items()):
                     if chunk[0] <= dl_state["file_index"] < chunk[1]:
                         part_color_code = 32 # Green
                         if dl_state["speed"] < 1024:
@@ -530,11 +530,13 @@ def gen_curl(state, request_range=None):
     download.setopt(pycurl.MAXREDIRS, 50)
 
     file_pos = 0
-    range_upper = None
+    range_upper = 1<<50  # "A lot"; no download should ever be a PiB
     if request_range:
-        range_lower, range_upper = request_range.split("-")
-        if range_lower:
-            file_pos = int(range_lower)
+        decoded_range_lower, decoded_range_upper = request_range.split("-")
+        if decoded_range_lower:
+            file_pos = int(decoded_range_lower)
+        if decoded_range_upper:
+            range_upper = int(decoded_range_upper)
 
     state["new_handles"].append(download)
     state["parts"][download] = { "buffer": [ ], "speed": 0, "chunk_start": file_pos, "chunk_end": range_upper, "file_index": file_pos }
@@ -575,7 +577,7 @@ def download_loop_handle_info_read(state):
         covered = IntervalSet()
         covered.add((0, state["file_size"] - 1))
         left_over = covered - state["done"]
-        for download, dl_state in state["parts"].items():
+        for download, dl_state in list(state["parts"].items()):
             left_over.remove((dl_state["chunk_start"], dl_state["chunk_end"]))
         for gap in left_over.contained:
             # These gaps won't be closed!
@@ -594,7 +596,7 @@ def download(url, target_file=None):
         state["parts"] = {}
         state["new_handles"] = []
         state["manager"] = manager
-        state["fd"] = open(state["target_file"], "r+")
+        state["fd"] = open(state["target_file"], "rb+")
         download_loop_handle_info_read(state)
     else:
         state.update({ "parts": {}, "done": IntervalSet(), "url": url, "manager": manager, "new_handles": [], "target_file": target_file })
@@ -647,13 +649,13 @@ def download(url, target_file=None):
                 print("\nSome parts of the file failed to download, namely bytes %s" % left_over)
                 fail_state = True
 
-        for download, dl_state in state["parts"].items():
+        for download, dl_state in list(state["parts"].items()):
             if "cancel_status" in dl_state and dl_state["cancel_status"] == "deliberate":
                 continue
             errstr = download.errstr()
             if errstr:
                 if not fail_state:
-                    print
+                    print()
                 print(errstr)
                 fail_state = True
 
