@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # encoding: utf-8
 import fcntl
 import io
@@ -73,7 +73,7 @@ if not HAS_PSUTIL:
 
         def uids(self):
             status_file = os.path.join("/proc/", str(self.pid), "status")
-            return map(int, [x for x in open(status_file).readlines() if x.startswith("Uid:")][0].split()[1:])
+            return list(map(int, [x for x in open(status_file).readlines() if x.startswith("Uid:")][0].split()[1:]))
 
 
 def ppid_cascade(process=None):
