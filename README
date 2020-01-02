@@ -1,6 +1,6 @@
 This is a collection of scripts I use in my everyday life. They are very useful
 to me, but I don't consider them interesting enough to maintain them in
-individual repositories. 
+individual repositories.
 
 I mainly put this up here so that I can easily move into new computers' $HOMEs.
 Don't expect too much documentation. But feel free to contact me if you have
@@ -77,13 +77,6 @@ Contents:
       gdo regex +anotherregex <command>
 
   use $.. or %.. to backreference in the command.
-
-* httpd
-
-  I'm sometimes in need of an ad-hoc httpd, but not a toy one like my ihttpd,
-  but one which can actually handle real-world-situations. This wrapper script
-  runs lighttpd, in the same fashion as my ihttpd: Serving from ./, with
-  support for PHP.
 
 * iwebd
 
