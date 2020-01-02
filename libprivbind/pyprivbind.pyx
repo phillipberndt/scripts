@@ -1,13 +1,18 @@
+# cython: language_level=3
 cdef extern from "libprivbind.h":
     int privbind(int sockfd, char *address, unsigned int port)
 
 import socket as _sock
 import os
 
+
 __all__ = [ "bind", "gensocket", "AF_INET", "AF_INET6", "SOCK_STREAM", "SOCK_DGRAM" ]
 __doc__ = "Bind sockets to a privileged port"
 
 AF_INET, AF_INET6, SOCK_STREAM, SOCK_DGRAM = _sock.AF_INET, _sock.AF_INET6, _sock.SOCK_STREAM, _sock.SOCK_DGRAM
+
+socket_type = getattr(_sock, "_socketobject", getattr(_sock, "socket", None))
+
 
 def bind(socket, address):
     """
@@ -25,11 +30,13 @@ def bind(socket, address):
           $ chmod a+x /etc/pyprivbind/80
         once before trying to invoke this.
     """
-    if type(socket) is not _sock._socketobject:
+    if type(socket) is not socket_type:
         raise TypeError("socket must be a socket.socket() instance")
 
     host, port = address
     port = int(port)
+    if not isinstance(host, bytes):
+        host = host.encode()
 
     retval = privbind(socket.fileno(), host, port)
     if retval == 255:
@@ -46,6 +53,7 @@ def bind(socket, address):
         raise RuntimeError("Failed to bind socket to port %d: Helper program `libprivbind-helper' is neither suid root nor has capibility cap_net_bind_service" % port)
     elif retval != 0:
         raise RuntimeError("Failed to bind socket to port %d: error %d (%s)" % (port, retval, os.strerror(retval)))
+
 
 def gensocket(address, family=_sock.AF_INET, type=_sock.SOCK_STREAM):
     """

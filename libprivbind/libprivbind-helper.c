@@ -35,7 +35,7 @@ int main() {
 	int sock_domain;
 	int sock_domain_length = sizeof(sock_domain);
 	if(getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &sock_domain, &sock_domain_length) != 0) {
-		exit(-3);
+		exit(errno);
 	}
 	if(sock_domain != AF_INET && sock_domain != AF_INET6) {
 		exit(-3);

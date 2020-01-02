@@ -13,10 +13,16 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-int privbind(int sockfd, char *address, in_port_t port) {
+static int privbind(int sockfd, char *address, in_port_t port) {
 	char fd_str[7];
 	char port_str[7];
 	int status = 0;
+
+	/* Python 3 sets F_CLOEXEC */
+	int fdflags = fcntl(sockfd, F_GETFD, NULL);
+	fdflags &= ~FD_CLOEXEC;
+	fcntl(sockfd, F_SETFD, fdflags);
+	fdflags = fcntl(sockfd, F_GETFD, NULL);
 
 	pid_t child_pid = fork();
 	if(child_pid == 0) {
