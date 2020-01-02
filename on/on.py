@@ -1,6 +1,14 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # encoding: utf-8
-import Queue
+from __future__ import print_function
+
+import sys
+
+if sys.version_info.major == 3:
+    import queue
+else:
+    import Queue as queue
+
 import datetime
 import fnmatch
 import getopt
@@ -112,8 +120,8 @@ class OnPIDExit(OnEvent):
             with global_output_lock:
                 if len(processes) > 1:
                     status(1, self.PREFIX, "Multiple choices: ")
-                    for pid, proc in processes.items():
-                        print "       %05s %s" % (pid, proc)
+                    for pid, proc in list(processes.items()):
+                        print("       %05s %s" % (pid, proc))
                     while True:
                         which = readline_timout("Which process do you want?", "all", 20, "^[0-9 ]+$")
                         if which == "all" or all(int(x) in processes for x in which.strip().split()):
@@ -121,9 +129,9 @@ class OnPIDExit(OnEvent):
                     if which != "all":
                         pid_list = [ int(x) for x in which.split() ]
                     else:
-                        pid_list = map(int, processes.keys())
+                        pid_list = list(map(int, list(processes.keys())))
                 else:
-                    pid_list = [ int(processes.keys()[0]) ]
+                    pid_list = [ int(list(processes.keys())[0]) ]
             status(0, self.PREFIX, "Waiting for any of %d processes to exit" % len(pid_list))
         self.pid_list = pid_list
 
@@ -162,7 +170,7 @@ if has_inotify:
                 self._paths.append(parameter)
                 status(0, self.PREFIX, "Watching for %s" % parameter)
 
-            self.ino_queue = Queue.Queue()
+            self.ino_queue = queue.Queue()
             self.setup_inotify()
 
         def _add_path_internal(self, path):
@@ -589,21 +597,21 @@ if has_alsa and has_numpy:
 # }}}
 
 def print_help():
-    print "Execute a program once a certain event occurs"
-    print "Syntax: on [-krw] <type>[:<arguments>] <type>[:<arguments>] .. [--] [sudo] <action>"
-    print
-    print "Options:"
-    print "  -k   Kill old action if it is retriggered too fast"
-    print "  -r   Repeat action"
-    print "  -w   Wait for action to complete before running it again"
-    print "  -o   Neatly format the action's output"
-    print "  -a   If multiple events are given, AND them instead of ORing"
-    print
-    print "Event types:"
+    print("Execute a program once a certain event occurs")
+    print("Syntax: on [-krw] <type>[:<arguments>] <type>[:<arguments>] .. [--] [sudo] <action>")
+    print()
+    print("Options:")
+    print("  -k   Kill old action if it is retriggered too fast")
+    print("  -r   Repeat action")
+    print("  -w   Wait for action to complete before running it again")
+    print("  -o   Neatly format the action's output")
+    print("  -a   If multiple events are given, AND them instead of ORing")
+    print()
+    print("Event types:")
     for cls in sorted(OnEvent.__subclasses__(), key=lambda x: x.PREFIX):
-        print "  %3s%-25s %s" % ("[~]" if cls.SUPPORTS_NEGATE else "", "%s:<%s>" % (cls.PREFIX, cls.PARAMETER_DESCRIPTION) if cls.PARAMETER_DESCRIPTION else cls.PREFIX, cls.DESCRIPTION)
-    print "An ampersand negates an event's meaning."
-    print
+        print("  %3s%-25s %s" % ("[~]" if cls.SUPPORTS_NEGATE else "", "%s:<%s>" % (cls.PREFIX, cls.PARAMETER_DESCRIPTION) if cls.PARAMETER_DESCRIPTION else cls.PREFIX, cls.DESCRIPTION))
+    print("An ampersand negates an event's meaning.")
+    print()
 
 global_status_info_cache = []
 last_index = [ 0 ]
@@ -631,7 +639,7 @@ def status(level, component, line, is_update=False):
         movement = index - last_index[0]
         last_index[0] = index + 1
 
-        print "%s\033[K[\033[1;%sm%s\033[0m] %s" % (("\033[%dA" % -movement) if movement < 0 else ("\033[%dB" % movement) if movement > 0 else "", col, component, line)
+        print("%s\033[K[\033[1;%sm%s\033[0m] %s" % (("\033[%dA" % -movement) if movement < 0 else ("\033[%dB" % movement) if movement > 0 else "", col, component, line))
 
 def readline_timout(query, default, timeout=0, expect=None):
     with global_output_lock:
@@ -644,14 +652,14 @@ def readline_timout(query, default, timeout=0, expect=None):
             while True:
                 if timeout:
                     signal.alarm(timeout)
-                data = raw_input("\007\033[1m%s\033[0m [%s, %ds timeout]: " % (query, default, timeout)).strip()
+                data = input("\007\033[1m%s\033[0m [%s, %ds timeout]: " % (query, default, timeout)).strip()
                 if not data:
                     return default
                 if not expect or re.match(expect, data):
                     return data
-                print "\033[1F\033[K",
+                print("\033[1F\033[K", end=' ')
         except _TimeoutError:
-            print
+            print()
             return default
         finally:
             signal.alarm(0)
@@ -721,7 +729,7 @@ def format_output_thread(proc):
                 if not force:
                     bufs[idn] = lines.pop()
                 for line in lines:
-                    print "\033[0;%dm>>>\033[0m" % (32 if out is stdout else 31), line
+                    print("\033[0;%dm>>>\033[0m" % (32 if out is stdout else 31), line)
 
     try:
         while True:
