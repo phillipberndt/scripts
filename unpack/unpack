@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # vim:noexpandtab:ts=8:sw=8
 #
 # Unpacking script
@@ -17,6 +17,8 @@
 #  - ISO and MSI support without 7z
 #
 # Changelog:
+#  - 02.01.2020
+#    Move to Python 3
 #  - 29.04.2018
 #    Fix debian packages (control.tar.* support)
 #  - 06.10.2016
@@ -231,7 +233,7 @@ class ZIPFile(filetype): # {{{
 						node = node.replace("..", ".")
 					if node[0] == "/":
 						node = "./" + node
-					print node
+					print(node)
 					targetDirectory = os.path.join(destination, os.path.dirname(node))
 					if not os.path.isdir(targetDirectory):
 						os.makedirs(targetDirectory)
@@ -566,7 +568,7 @@ if libarchive:
 			os.chdir(destination)
 			h = ctypes.c_void_p()
 			while libarchive.archive_read_next_header(r, ctypes.pointer(h)) == 0:
-				print libarchive.archive_entry_pathname(h)
+				print(libarchive.archive_entry_pathname(h))
 				if libarchive.archive_read_extract(r, h, 0) != 0:
 					sout("fail", "libarchive returned with an error: %s" % libarchive.archive_error_string(r))
 					success = False
@@ -599,7 +601,7 @@ if not sys.stdout.isatty():
 		"""
 			Output text prepended with ' * '
 		"""
-		print ' * ', text
+		print(' * ', text)
 else:
 	def sout(level, text):
 		"""
@@ -616,10 +618,10 @@ else:
 			color = 34
 		else:
 			color = 39
-		print "\x1b[%d;01m*\x1b[39;00m %s" % (color, text)
+		print("\x1b[%d;01m*\x1b[39;00m %s" % (color, text))
 def askYesNo(question):
 	while True:
-		print " ", question, " [yn]: ",
+		print(" ", question, " [yn]: ", end=' ')
 		answer = sys.stdin.readline().strip()
 		if answer in ("y", "n"): break
 	return answer == "y"
@@ -630,7 +632,7 @@ if not (sys.stdout.isatty() and sys.stdin.isatty()):
 			(For non-interactive terminals)
 		"""
 		if type(choices) is list:
-			choices = dict(zip(range(len(choices)), choices))
+			choices = dict(list(zip(list(range(len(choices))), choices)))
 		assert(default in choices)
 		sout("good", "Assuming %s" % choices[default])
 		return default
@@ -640,18 +642,18 @@ else:
 			Ask the user for something
 		"""
 		if type(choices) is list:
-			choices = dict(zip(range(len(choices)), choices))
+			choices = dict(list(zip(list(range(len(choices))), choices)))
 		assert(default in choices)
 		if len(choices) == 1:
 			return default
 		fieldLength = len(str(max(choices.keys())))
 		fmtString = " %%0%dd. %%s" % fieldLength
-		selectIn = choices.keys()
-		for number, key in zip(range(len(selectIn)), selectIn):
-			print fmtString % (number + 1, choices[key])
+		selectIn = list(choices.keys())
+		for number, key in zip(list(range(len(selectIn))), selectIn):
+			print(fmtString % (number + 1, choices[key]))
 		while True:
 			try:
-				userChoice = raw_input(">> ").strip()
+				userChoice = input(">> ").strip()
 				if not userChoice:
 					choice = default
 				else:
@@ -746,8 +748,8 @@ def hookURLDownload(file):
 			success = os.system("wget -O %s %s" % (se(targetFile), se(file))) == 0
 		else:
 			try:
-				import urllib
-				urllib.urlretrieve(file, targetFile)
+				import urllib.request, urllib.parse, urllib.error
+				urllib.request.urlretrieve(file, targetFile)
 				success = True
 			except:
 				success = False
@@ -813,7 +815,7 @@ if __name__ == '__main__':
 		file = files[fileNr]
 		if len(files) > 1:
 			if fileNr > 0:
-				print
+				print()
 			sout("good", "[%d/%d] Processing %s" % (fileNr + 1, len(files), file))
 
 		# Apply hooks
@@ -895,7 +897,7 @@ if __name__ == '__main__':
 				sout("warn", "Archive was empty")
 				os.system("rmdir %s" % se(destination))
 				continue
-			if len(filter(lambda x: x[0] == ".", filesInDestination)) > 0:
+			if len([x for x in filesInDestination if x[0] == "."]) > 0:
 				sout("warn", "Archive contains dotfiles. Will not move contents to ./")
 			else:
 				#directoriesInDestination = filter(lambda d: os.path.isdir(os.path.join(destination, d)), filesInDestination)
@@ -909,7 +911,7 @@ if __name__ == '__main__':
 						destination = "%s~%d" % (destination, counter)
 						os.system("mv %s %s" % (se(oldDestination), se(destination)))
 					# Check whether some unpacked files already exist in ./
-					if len(filter(lambda d: os.access(d, os.F_OK), filesInDestination)) == 0:
+					if len([d for d in filesInDestination if os.access(d, os.F_OK)]) == 0:
 						# If not, move files to ./
 						os.system("mv %s/* ./" % se(destination))
 						os.system("rmdir %s" % se(destination))
@@ -925,7 +927,7 @@ if __name__ == '__main__':
 				# Search for multifile archive parts
 				pattern = re.sub("[0-9]+", "[0-9]+", re.escape(os.path.basename(file)))
 				pattern = re.compile(re.sub("(rar|zip)$", lambda x: x.group(1)[0] + ".{2}", pattern))
-				for similarFile in filter(lambda x: pattern.match(os.path.basename(x)), glob(os.path.dirname(file) + "*")):
+				for similarFile in [x for x in glob(os.path.dirname(file) + "*") if pattern.match(os.path.basename(x))]:
 					removeFiles.add(similarFile)
 			removeBecauseIsHooked = False
 		if removeBecauseIsHooked:
@@ -937,9 +939,9 @@ if __name__ == '__main__':
 	# Remove files which look as if they are part of a removed multi-file archive
 	if removeFiles:
 		sout("good", "These files look associated to removed files:")
-		removeFiles = filter(lambda f: os.access(f, os.F_OK) and not os.path.isdir(f), removeFiles)
+		removeFiles = [f for f in removeFiles if os.access(f, os.F_OK) and not os.path.isdir(f)]
 		for sfile in removeFiles:
-				print "  -", sfile
+				print("  -", sfile)
 		if askYesNo("Delete them?"):
 			for sfile in removeFiles:
 				os.unlink(sfile)
