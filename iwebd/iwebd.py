@@ -1,11 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # encoding: utf-8
 #
 # Gigantic and monolitic http(s)d and ftpd and everything else that makes a move from b to c
-# Copyright (c) 2015, Phillip Berndt
+# Copyright (c) 2015-2020, Phillip Berndt
 #
-import SocketServer
-import StringIO
+import socketserver
+import io
 import argparse
 import atexit
 import base64
@@ -37,13 +37,14 @@ import tempfile
 import threading
 import time
 import traceback
-import urllib
-import urlparse
+import urllib.request, urllib.parse, urllib.error
+import urllib.parse
 import uuid
 import xml.dom.minidom
 
 from wsgiref.handlers import format_date_time
 from functools import partial
+from functools import reduce
 
 # TODO (Socks) proxy server
 # TODO ngrok support (?!)
@@ -142,7 +143,7 @@ class SSLKey(object):
             self.cert = self._certfile.name
             logging.getLogger("main").info("SSL certificates created in %s (key) and %s (cert)", self.key, self.cert)
 
-class ReusableServer(SocketServer.ThreadingTCPServer):
+class ReusableServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
 
     def __init__(self, server_address, RequestHandlerClass, options={}):
@@ -162,14 +163,14 @@ class ReusableServer(SocketServer.ThreadingTCPServer):
                     # SSL implementation does not support ALPN
                     pass
             self.ssl_context = context
-        SocketServer.ThreadingTCPServer.__init__(self, server_address, RequestHandlerClass)
+        socketserver.ThreadingTCPServer.__init__(self, server_address, RequestHandlerClass)
 
     def finish_request(self, request, client_address):
         """Finish one request by instantiating RequestHandlerClass."""
         self.RequestHandlerClass(request, client_address, self, options=self.__options)
 
     def get_request(self):
-        sock, client_address = SocketServer.ThreadingTCPServer.get_request(self)
+        sock, client_address = socketserver.ThreadingTCPServer.get_request(self)
         if "ssl_wrap" in self.__options:
             sock = self.ssl_context.wrap_socket(sock, server_side=True)
         return sock, client_address
@@ -189,7 +190,7 @@ class ReusableServer(SocketServer.ThreadingTCPServer):
                 self.socket.bind(self.server_address)
             self.server_address = self.socket.getsockname()
 
-class FtpHandler(SocketServer.StreamRequestHandler):
+class FtpHandler(socketserver.StreamRequestHandler):
     """
         FTP server handler
 
@@ -217,7 +218,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
         self.data_mode = { "mode": "PORT", "ip": client_address, "port": 20, "socket": None, "server_socket": None }
 
         self.options = options
-        SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
+        socketserver.StreamRequestHandler.__init__(self, request, client_address, server)
 
     def log(self, lvl, msg, *args, **kwargs):
         kwargs.update({
@@ -231,9 +232,9 @@ class FtpHandler(SocketServer.StreamRequestHandler):
             lines = line.split("\r\n")
             code, rest = lines[0].split(None, 1)
             lines = [ "%s-%s" % (code, rest) ] + lines[1:-1] + [ "%s %s" % (code, lines[-1]) ]
-            self.wfile.write("%s\r\n" % "\r\n".join(lines))
+            self.wfile.write(("%s\r\n" % "\r\n".join(lines)).encode())
         else:
-            self.wfile.write("%s\r\n" % line)
+            self.wfile.write(("%s\r\n" % line).encode())
 
     def connect_data_socket(self):
         "Establish a data connection to the client. Does not handle errors. Handles PASV/PORT for you."
@@ -266,9 +267,9 @@ class FtpHandler(SocketServer.StreamRequestHandler):
             if self.rest:
                 file.seek(self.rest)
             if read_from_client:
-                fd_copy(self.data_mode["socket"].makefile("r"), file, -1)
+                fd_copy(self.data_mode["socket"].makefile("rb"), file, -1)
             else:
-                fd_copy(file, self.data_mode["socket"].makefile("w"), -1)
+                fd_copy(file, self.data_mode["socket"].makefile("wb"), -1)
         except socket.error:
             self.reply("426 Connection closed; transfer aborted.")
             return
@@ -307,7 +308,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
 
     def generate_directory_listing(self, path):
         "Generate a `ls -l' style file listing and return it as a StringIO instance."
-        response = StringIO.StringIO()
+        response = io.StringIO()
         if os.path.isdir(path or "."):
             target = os.listdir(path or ".")
         else:
@@ -331,15 +332,15 @@ class FtpHandler(SocketServer.StreamRequestHandler):
             mtime = datetime.datetime.fromtimestamp(fstat.st_mtime)
             response.write("%c%c%c%c%c%c%c%c%c%c 1 %s %s %13d %s %3s %s %s%s\r\n" % (
                 ftype,
-                "r" if fstat.st_mode & 00400 else "-",
-                "w" if fstat.st_mode & 00200 else "-",
-                "x" if fstat.st_mode & 00100 else "-",
-                "r" if fstat.st_mode & 00040 else "-",
-                "w" if fstat.st_mode & 00020 else "-",
-                "x" if fstat.st_mode & 00010 else "-",
-                "r" if fstat.st_mode & 00004 else "-",
-                "w" if fstat.st_mode & 00002 else "-",
-                "x" if fstat.st_mode & 00001 else "-",
+                "r" if fstat.st_mode & 0o0400 else "-",
+                "w" if fstat.st_mode & 0o0200 else "-",
+                "x" if fstat.st_mode & 0o0100 else "-",
+                "r" if fstat.st_mode & 0o0040 else "-",
+                "w" if fstat.st_mode & 0o0020 else "-",
+                "x" if fstat.st_mode & 0o0010 else "-",
+                "r" if fstat.st_mode & 0o0004 else "-",
+                "w" if fstat.st_mode & 0o0002 else "-",
+                "x" if fstat.st_mode & 0o0001 else "-",
                 pwd.getpwuid(fstat.st_uid).pw_name if has_pwd else "-",
                 grp.getgrgid(fstat.st_gid).gr_name if has_pwd else "-",
                 fstat.st_size,
@@ -349,13 +350,14 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 element,
                 symlink_info))
         response.seek(0)
+        response = io.BytesIO(response.read().encode())
         return response
 
     def handle(self):
         self.log(logging.DEBUG, "Incoming FTP connection")
         self.reply("220 Service ready for new user.")
         while True:
-            command = self.rfile.readline().strip()
+            command = self.rfile.readline().decode().strip()
             if not command:
                 break
             self.log(logging.DEBUG, "Raw command: `%(command)s'", command=command)
@@ -452,8 +454,8 @@ class FtpHandler(SocketServer.StreamRequestHandler):
 
                 try:
                     if command[0] == "NLST":
-                        response = StringIO.StringIO()
-                        response.write("\r\n".join(os.listdir(path or ".")))
+                        response = io.BytesIO()
+                        response.write(("\r\n".join(os.listdir(path or "."))).encode())
                         response.seek(0)
                     else:
                         response = self.generate_directory_listing(path)
@@ -487,7 +489,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                 if which_file == False:
                     continue
                 self.log(logging.INFO, "%(command)s %(path)s", command=command[0], path=which_file)
-                self.reply_with_file(open(which_file, "r"))
+                self.reply_with_file(open(which_file, "rb"))
                 continue
             elif command[0] == "CDUP":
                 self.current_path = "/".join(self.current_path.split("/")[:-1])
@@ -515,7 +517,7 @@ class FtpHandler(SocketServer.StreamRequestHandler):
                     continue
                 self.log(logging.INFO, "%(command)s %(path)s", command=command[0], path=target_file)
                 try:
-                    target = open(target_file, "w" if command[0] != "APPE" else "a")
+                    target = open(target_file, "wb" if command[0] != "APPE" else "ab")
                 except:
                     self.reply("550 Requested action not taken.")
                     continue
@@ -600,7 +602,7 @@ class ChunkWrapper(io.BufferedIOBase):
 
     def __exit__(self, type, value, traceback):
         if not self.finalized:
-            self.fileobj.write("0\r\n\r\n")
+            self.fileobj.write(b"0\r\n\r\n")
             self.finalized = True
         if hasattr(self.fileobj, "__exit__"):
             self.fileobj.__exit__(type, value, traceback)
@@ -608,7 +610,7 @@ class ChunkWrapper(io.BufferedIOBase):
     def write(self, data):
         assert not self.finalized
         if data:
-            self.fileobj.write("%x\r\n%s\r\n" % (len(data), data))
+            self.fileobj.write(b"%x\r\n%s\r\n" % (len(data), data))
             self.offset += len(data)
 
     def flush(self):
@@ -619,11 +621,11 @@ class ChunkWrapper(io.BufferedIOBase):
 
     def writelines(self, lines):
         for line in lines:
-            self.write("%s\n" % line)
+            self.write(b"%s\n" % line)
 
     def close(self):
         if not self.finalized:
-            self.fileobj.write("0\r\n\r\n")
+            self.fileobj.write(b"0\r\n\r\n")
             self.finalized = True
 
     def tell(self):
@@ -646,11 +648,11 @@ if has_gzip:
 
 class EmbedLivereloadWrapper(io.IOBase):
     "Wrapper around a HTML file that embeds a LiveReload JS into the file"
-    EMBED_CODE = """<script>document.write('<script src="/.well-known/live-reload/lr.js"><' + '/script>');</script>"""
+    EMBED_CODE = b"""<script>document.write('<script src="/.well-known/live-reload/lr.js"><' + '/script>');</script>"""
 
     def __init__(self, fileobj):
         self.fileobj = fileobj
-        self.buffer = StringIO.StringIO()
+        self.buffer = io.BytesIO()
         self._reached_eof = False
         self._fileobj_len = None
         self._injected = False
@@ -680,7 +682,7 @@ class EmbedLivereloadWrapper(io.IOBase):
                     break
                 remain -= len(data)
             if not self._injected:
-                match = re.search("(?i)</body|</html", self.buffer.getvalue())
+                match = re.search(b"(?i)</body|</html", self.buffer.getvalue())
                 inject_at = False
                 if match:
                     inject_at = match.start()
@@ -707,7 +709,7 @@ class EmbedLivereloadWrapper(io.IOBase):
         self._fill_buffer(count)
         return self.buffer.read(count)
 
-class HttpHandler(SocketServer.StreamRequestHandler):
+class HttpHandler(socketserver.StreamRequestHandler):
     """
         HTTP server
 
@@ -893,15 +895,15 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     }
 
     HTTP2_HEADERS_STATIC_TABLE = (
-        (":authority",""), (":method","GET"), (":method","POST"), (":path","/"), (":path","/index.html"), (":scheme","http"), (":scheme","https"),
-        (":status","200"), (":status","204"), (":status","206"), (":status","304"), (":status","400"), (":status","404"), (":status","500"),
-        ("accept-charset",""), ("accept-encoding","gzip, deflate"), ("accept-language",""), ("accept-ranges",""), ("accept",""), ("access-control-allow-origin",""),
-        ("age",""), ("allow",""), ("authorization",""), ("cache-control",""), ("content-disposition",""), ("content-encoding",""), ("content-language",""),
-        ("content-length",""), ("content-location",""), ("content-range",""), ("content-type",""), ("cookie",""), ("date",""), ("etag",""), ("expect",""),
-        ("expires",""), ("from",""), ("host",""), ("if-match",""), ("if-modified-since",""), ("if-none-match",""), ("if-range",""), ("if-unmodified-since",""),
-        ("last-modified",""), ("link",""), ("location",""), ("max-forwards",""), ("proxy-authenticate",""), ("proxy-authorization",""), ("range",""),
-        ("referer",""), ("refresh",""), ("retry-after",""), ("server",""), ("set-cookie",""), ("strict-transport-security",""), ("transfer-encoding",""),
-        ("user-agent",""), ("vary",""), ("via",""), ("www-authenticate",""),
+        (b":authority",b""), (b":method",b"GET"), (b":method",b"POST"), (b":path",b"/"), (b":path",b"/index.html"), (b":scheme",b"http"), (b":scheme",b"https"),
+        (b":status",b"200"), (b":status",b"204"), (b":status",b"206"), (b":status",b"304"), (b":status",b"400"), (b":status",b"404"), (b":status",b"500"),
+        (b"accept-charset",b""), (b"accept-encoding",b"gzip, deflate"), (b"accept-language",b""), (b"accept-ranges",b""), (b"accept",b""), (b"access-control-allow-origin",b""),
+        (b"age",b""), (b"allow",b""), (b"authorization",b""), (b"cache-control",b""), (b"content-disposition",b""), (b"content-encoding",b""), (b"content-language",b""),
+        (b"content-length",b""), (b"content-location",b""), (b"content-range",b""), (b"content-type",b""), (b"cookie",b""), (b"date",b""), (b"etag",b""), (b"expect",b""),
+        (b"expires",b""), (b"from",b""), (b"host",b""), (b"if-match",b""), (b"if-modified-since",b""), (b"if-none-match",b""), (b"if-range",b""), (b"if-unmodified-since",b""),
+        (b"last-modified",b""), (b"link",b""), (b"location",b""), (b"max-forwards",b""), (b"proxy-authenticate",b""), (b"proxy-authorization",b""), (b"range",b""),
+        (b"referer",b""), (b"refresh",b""), (b"retry-after",b""), (b"server",b""), (b"set-cookie",b""), (b"strict-transport-security",b""), (b"transfer-encoding",b""),
+        (b"user-agent",b""), (b"vary",b""), (b"via",b""), (b"www-authenticate",b""),
     )
 
     HTTP2_HEADERS_HUFFMAN_CODE = (
@@ -954,10 +956,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             options["_http_active_nonces"] = {}
         self.active_nonces = options["_http_active_nonces"]
         self._body_reader = False
-        SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
+        socketserver.StreamRequestHandler.__init__(self, request, client_address, server)
 
     def setup(self):
-        SocketServer.StreamRequestHandler.setup(self)
+        socketserver.StreamRequestHandler.setup(self)
         self.processing_started = time.time()
 
     def read_http_method(self):
@@ -966,7 +968,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             line = None
             while not line:
                 try:
-                    line = self.rfile.readline()
+                    line = self.rfile.readline().decode()
                 except IOError as e:
                     if e.errno == errno.EAGAIN:
                         continue
@@ -993,7 +995,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         r"Read all HTTP headers until \r\n"
         previous_header = None
         while True:
-            line = self.rfile.readline()
+            line = self.rfile.readline().decode()
             line = line[:-2 if len(line) > 1 and line[-2] == "\r" else -1]
             if not line:
                 break
@@ -1019,7 +1021,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     self.eof = False
                 def read(self, size=None):
                     if self.eof:
-                        return ""
+                        return b""
                     if self.bytes_to_read is not None:
                         ret = file_read(self.req.rfile, min(self.bytes_to_read, size) if size is not None else self.bytes_to_read)
                         self.bytes_to_read -= len(ret)
@@ -1036,12 +1038,12 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                                 self.eof = True
                                 break
                             self.chunk_buffer.append(file_read(self.req.rfile, chunk_size))
-                        data = "".join(self.chunk_buffer)
+                        data = b"".join(self.chunk_buffer)
                         self.chunk_buffer = [ data[size:] ] if size is not None else []
                         return data[:size] if size is not None else data
                     else:
                         self.eof = True
-                        return ""
+                        return b""
             self._body_reader = _body_reader(self)
         return self._body_reader
 
@@ -1049,7 +1051,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         "Read the body of a request. Safe to call twice, as this function memorizes whether the body has been read."
         body_reader = self.get_http_body_reader()
         fd_copy(body_reader, target_file, -1)
-        assert body_reader.read() == ""
+        assert body_reader.read() == b""
 
     def send_header(self, status, headers):
         "Send the headers of a reply."
@@ -1077,13 +1079,13 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         else:
             self.do_keep_alive = headers["Connection"].lower() == "keep-alive"
         headers_list = []
-        for name, value in headers.items():
+        for name, value in list(headers.items()):
             if type(value) is list:
                 for svalue in value:
                     headers_list.append("%s: %s" % (name, svalue))
             else:
                 headers_list.append("%s: %s" % (name, value))
-        self.wfile.write("%s %s\r\n%s\r\n\r\n" % (self.http_version, status, "\r\n".join(headers_list)))
+        self.wfile.write(("%s %s\r\n%s\r\n\r\n" % (self.http_version, status, "\r\n".join(headers_list))).encode())
 
     def send_error(self, error_message, force_close=False, details="", headers={}):
         "Reply with an error message. After calling this, you can safely return from any handler."
@@ -1094,7 +1096,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         body = "%s%s</body>" % (self.SERVER_MESSAGE_PREAMBLE % { "title": error_message }, xml_escape(details))
         headers.update({ "Content-Length": len(body), "Content-Type": "text/html" })
         self.send_header(error_message, headers)
-        self.wfile.write(body)
+        self.wfile.write(body.encode())
 
     def begin_chunked_reply(self, status, headers):
         assert "Transfer-Encoding" not in headers
@@ -1113,7 +1115,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 headers["Content-Encoding"] = [ "gzip" ]
         headers["Transfer-Encoding"] = [ ", ".join(te_header) ]
         self.send_header(status, headers)
-        return reduce(lambda x, y: y(x), wrapper, self.wfile if self.method.lower() != "head" else StringIO.StringIO())
+        return reduce(lambda x, y: y(x), wrapper, self.wfile if self.method.lower() != "head" else io.BytesIO())
 
     def handle_request_for_cgi(self):
         "Like handle_request_for_file, but run the target file as a CGI script"
@@ -1123,7 +1125,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         else:
             execute = [ self.mapped_path ]
 
-        path = urlparse.urlparse(self.path)
+        path = urllib.parse.urlparse(self.path)
         environ = os.environ.copy()
         environ.update({
                 "SERVER_SOFTWARE": "ihttpd",
@@ -1158,7 +1160,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         cgi_headers = {}
         last_header = None
         while True:
-            cgi_header = cgi_process.stdout.readline()
+            cgi_header = cgi_process.stdout.readline().decode()
             if not cgi_header:
                 self.send_error("500 Internal server error", True)
                 cgi_process.terminate()
@@ -1183,7 +1185,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     cgi_headers[last_header] = [ value.strip() ]
 
         status = "200 Ok" if "status" not in cgi_headers else cgi_headers["status"][0]
-        headers = { ucparts(key): value for key, value in cgi_headers.items() if key != "status" }
+        headers = { ucparts(key): value for key, value in list(cgi_headers.items()) if key != "status" }
         if "Content-Type" not in headers:
             headers["Content-Type"] = [ "text/html" ]
 
@@ -1207,8 +1209,8 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     def handle_request_for_file(self):
         "Handle a request for a file, simple GET/HEAD/POST case."
         if os.path.isdir(self.mapped_path):
-            request = urlparse.urlparse(self.path)
-            query = urlparse.parse_qs(request.query)
+            request = urllib.parse.urlparse(self.path)
+            query = urllib.parse.parse_qs(request.query)
             path = request.path
 
             if "action" in query and query["action"][0] == "download":
@@ -1217,42 +1219,47 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 if self.do_keep_alive:
                     with self.begin_chunked_reply("200 Ok", headers) as wfile:
                         outfile = tarfile.open(mode="w|bz2" if has_bz2 else "w", fileobj=wfile, format=tarfile.GNU_FORMAT)
-                        outfile.add(self.mapped_path, "")
+                        outfile.add(self.mapped_path)
                         outfile.close()
                 else:
                     self.send_header("200 Ok", headers)
                     self.connection.setblocking(True) # Workaround for http/2 support
                     outfile = tarfile.open(mode="w|bz2" if has_bz2 else "w", fileobj=self.wfile, format=tarfile.GNU_FORMAT)
-                    outfile.add(self.mapped_path, "")
+                    outfile.add(self.mapped_path)
                     outfile.close()
                 return
 
             if "write_access" in self.options and self.options["write_access"] and "content-type" in self.headers:
-                fp = email.parser.FeedParser()
-                fp.feed("Content-Type: %s\r\n\r\n" % (self.headers["content-type"][0]))
+                # TODO Cannot use this in Python3
+                fp = email.parser.BytesFeedParser()
+                fp.feed(("Content-Type: %s\r\n\r\n" % (self.headers["content-type"][0])).encode())
                 body = self.get_http_body_reader()
                 while True:
                     data = body.read(1024 ** 2)
+                    fp.feed(data)
                     if not data:
                         break
-                    fp.feed(data)
                 msg = fp.close()
                 del fp
                 is_upload = False
                 for part in msg.get_payload():
-                    if "upload" in part.get("content-disposition", "") and part.get_payload() == "Upload":
+                    # A simple hack to work around that multipart/form-data does not escape file names in headers
+                    for i in range(len(part._headers)):
+                        part._headers[i] = (part._headers[i][0], part._headers[i][1].encode("ascii", "surrogateescape").decode())
+                    if "upload" in str(part.get("Content-Disposition", "")) and part.get_payload() == "Upload":
                         is_upload = True
                         break
                 if is_upload:
                     for part in msg.get_payload():
-                        disposition = part.get("content-disposition", "")
+                        disposition = str(part.get("content-disposition", ""))
                         filename = re.search(r'filename="((?:[^"]|\")+)"', disposition)
+                        cte = part.get("content-transfer-encoding", "")
                         if filename:
                             filename = filename.group(1).replace(r'\"', '"')
                             self.logger.info("Received file %(filename)s", { "filename": filename })
                             if not "/" in filename:
-                                with open(os.path.join(self.mapped_path, filename), "w") as outfile:
-                                    data = StringIO.StringIO(part.get_payload())
+                                with open(os.path.join(self.mapped_path, filename), "wb") as outfile:
+                                    data = io.BytesIO(part.get_payload(decode=True) if cte else part._payload.encode("ascii", "surrogateescape"))
                                     fd_copy(data, outfile, -1)
                     self.send_header("302 Found", { "Location": path, "Content-Length": 0 })
                     return
@@ -1296,8 +1303,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 data.append(self.POST_FORM_HTML)
             data.append("</body>")
             data = "\r\n".join(data)
+            data = data.encode()
             size = len(data)
-            file = StringIO.StringIO(data)
+            file = io.BytesIO(data)
         else:
             mime_type = mimetypes.guess_type(self.mapped_path)[0]
             stat = os.stat(self.mapped_path)
@@ -1318,10 +1326,12 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         if size >= 0:
             if size > 1024 and size < 102400 and self.use_gzip and "accept-encoding" in self.headers and "gzip" in (", ".join(self.headers["accept-encoding"])).lower():
                 # Compress small files on the fly
-                compressed = StringIO.StringIO()
-                with GzipWrapper(mode="w", fileobj=compressed) as out:
-                    file.seek(0)
-                    out.write(file.read(size))
+                compressed = io.BytesIO()
+                out = GzipWrapper(mode="wb", fileobj=compressed)
+                file.seek(0)
+                out.write(file.read(size))
+                out.flush()
+                size = compressed.tell()
                 size = compressed.tell()
                 compressed.seek(0)
                 file = compressed
@@ -1357,6 +1367,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
     def handle_dav_request(self):
         "Handle webdav specific methods."
+        # TODO Webdav does not work yet
         method = self.method.upper()
         if method == "OPTIONS":
             self.read_http_body()
@@ -1366,7 +1377,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 "Content-Length": 0 })
         elif method == "PROPFIND":
             self.read_http_body()
-            response = StringIO.StringIO()
+            response = io.StringIO()
             response.write("<?xml version='1.0' encoding='utf-8'?>\r\n<D:multistatus xmlns:D='DAV:'>")
             if os.path.isdir(self.mapped_path):
                 if "depth" in self.headers and self.headers["depth"][0] == "0":
@@ -1387,7 +1398,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                     else:
                         res_type = "<D:resourcetype/><D:getcontentlength>%d</D:getcontentlength>" % (stat.st_size, )
                     response.write("<D:response><D:href>%s%s%s</D:href><D:propstat><D:prop>%s</D:prop><D:status>HTTP/1.1 200 Ok</D:status></D:propstat></D:response>\r\n" % \
-                                   (urllib.quote(self.path), "/" if self.path[-1] != "/" else "", urllib.quote(file_name), res_type))
+                                   (urllib.parse.quote(self.path), "/" if self.path[-1] != "/" else "", urllib.parse.quote(file_name), res_type))
             else:
                 try:
                     stat = os.stat(self.mapped_path)
@@ -1401,13 +1412,14 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                                (self.path, stat.st_size, iso_time(stat.st_ctime), format_date_time(stat.st_mtime), mimetypes.guess_type(self.path)[0] or "application/octet-stream"))
             response.write("</D:multistatus>\r\n")
             response.seek(0)
-            self.reply_with_file_like_object(response, len(response.buf), "text/xml; charset=utf-8", "207 Multi-Status")
+            response = io.BytesIO(response.read().encode())
+            self.reply_with_file_like_object(response, len(response.getbuffer()), "text/xml; charset=utf-8", "207 Multi-Status")
         elif not "write_access" in self.options or not self.options["write_access"]:
             self.read_http_body()
             self.send_error("405 Method not allowed")
         elif method == "PUT":
             try:
-                target_file = open(self.mapped_path, "w")
+                target_file = open(self.mapped_path, "wb")
                 self.read_http_body(target_file)
                 self.send_header("201 Created", { "Content-Length": 0 })
             except:
@@ -1457,7 +1469,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
     def map_url(self, url_arg):
         "Map an URL (or path of an URL) to a local file"
-        url = urlparse.urlparse(url_arg)
+        url = urllib.parse.urlparse(url_arg)
         path = re.sub("^/+", "", urldecode(url.path))
         cwd = os.path.abspath(".")
         mapped_path = os.path.join(cwd, path)
@@ -1478,16 +1490,16 @@ class HttpHandler(SocketServer.StreamRequestHandler):
     def handle_dlna(self):
         """Handle a request for dlna related stuff"""
         if self.path.startswith("/.well-known/dlna/description.xml"):
-            self.reply_with_file_like_object(StringIO.StringIO("""<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0"><specVersion><major>1</major><minor>0</minor></specVersion>
+            self.reply_with_file_like_object(io.BytesIO("""<?xml version="1.0"?><root xmlns="urn:schemas-upnp-org:device-1-0"><specVersion><major>1</major><minor>0</minor></specVersion>
                 <device><deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType><friendlyName>iwebd on {host}</friendlyName><serialNumber>1</serialNumber>
                 <UDN>uuid:2f71654a-4ed0-486d-96a8-5185f96dea1e</UDN><serviceList>
                 <service><serviceType>urn:schemas-upnp-org:service:ContentDirectory:1</serviceType><serviceId>urn:upnp-org:serviceId:ContentDirectory</serviceId><SCPDURL>/.well-known/dlna/cds.xml</SCPDURL>
                 <controlURL>/.well-known/dlna/control/cds</controlURL><eventSubURL>/.well-known/dlna/event/cds</eventSubURL></service>
-                </serviceList></device><URLBase>http://{host}/</URLBase></root>""".format(host=self.headers["host"][0])), -1, "application/xml; charset=utf8", "200 Ok")
+                </serviceList></device><URLBase>http://{host}/</URLBase></root>""".format(host=self.headers["host"][0]).encode()), -1, "application/xml; charset=utf8", "200 Ok")
             return
 
         if self.path.startswith("/.well-known/dlna/cds.xml"):
-            self.reply_with_file_like_object(StringIO.StringIO("""<?xml version="1.0" encoding="utf-8"?><scpd xmlns="urn:schemas-upnp-org:service-1-0">
+            self.reply_with_file_like_object(io.BytesIO(b"""<?xml version="1.0" encoding="utf-8"?><scpd xmlns="urn:schemas-upnp-org:service-1-0">
                     <specVersion> <major>1</major> <minor>0</minor> </specVersion> <actionList> <action> <name>Browse</name> <argumentList> <argument> <name>ObjectID</name> <direction>in</direction>
                     <relatedStateVariable>A_ARG_TYPE_ObjectID</relatedStateVariable> </argument> <argument> <name>BrowseFlag</name> <direction>in</direction> <relatedStateVariable>A_ARG_TYPE_BrowseFlag</relatedStateVariable>
                     </argument> <argument> <name>Filter</name> <direction>in</direction> <relatedStateVariable>A_ARG_TYPE_Filter</relatedStateVariable> </argument> <argument> <name>StartingIndex</name> <direction>in</direction>
@@ -1516,7 +1528,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             if "soapaction" not in self.headers or "urn:schemas-upnp-org:service:ContentDirectory:1#Browse" not in self.headers["soapaction"][0]:
                 self.send_error("404 Not Found")
                 return
-            body = self.get_http_body_reader().read()
+            body = self.get_http_body_reader().read().decode()
             request = xml.dom.minidom.parseString(body)
             assert request.documentElement.firstChild.firstChild.nodeName.lower().endswith("browse")
             request_attrs = {}
@@ -1567,7 +1579,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                         else:
                             file_mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
                             result_elements.append(xml_escape('<item id="{}" parentID="{}" restricted="false"><dc:title>{}</dc:title><upnp:class>object.item.{}Item</upnp:class><res protocolInfo="http-get:*:{}:*" size="{}">http://{}/{}</res></item>'.format(
-                                key, object_id, xml_escape(fn), file_mime_type.split("/")[0], file_mime_type, os.stat(path).st_size, xml_escape(self.headers["host"][0]), xml_escape(urllib.quote(path)))))
+                                key, object_id, xml_escape(fn), file_mime_type.split("/")[0], file_mime_type, os.stat(path).st_size, xml_escape(self.headers["host"][0]), xml_escape(urllib.parse.quote(path)))))
                     except OSError:
                         pass
 
@@ -1584,8 +1596,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             result.append(xml_escape('</DIDL-Lite>'))
             result.append('</Result><NumberReturned>{}</NumberReturned><TotalMatches>{}</TotalMatches><UpdateID>0</UpdateID></u:BrowseResponse></s:Body></s:Envelope>'.format(len(filtered_results), len(result_elements)))
             out = "".join(result)
+            out = out.encode()
 
-            self.reply_with_file_like_object(StringIO.StringIO(out), len(out), "text/xml; charset=UTF-8", "200 OK", {"Ext": "", "Connection": "close", "Server": "Linux/4.10.0-40-generic, UPnP/1.0, MediaTomb/0.12.2"})
+            self.reply_with_file_like_object(io.BytesIO(out), len(out), "text/xml; charset=UTF-8", "200 OK", {"Ext": "", "Connection": "close", "Server": "Linux/4.10.0-40-generic, UPnP/1.0, MediaTomb/0.12.2"})
             return
 
         self.send_error("404 Not Found")
@@ -1597,7 +1610,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             # Home-brew simplified live reload protocol
             urls = None
             if "?" in self.path:
-                urls = map(urllib.unquote, self.path[self.path.index("?")+1:].split("&"))
+                urls = list(map(urllib.parse.unquote, self.path[self.path.index("?")+1:].split("&")))
                 self.log(logging.DEBUG, "Live-reload requested upon change of %(urls)r", urls=urls)
                 for url in urls:
                     path = "./%s" % url
@@ -1610,7 +1623,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 if urls and event.pathname not in urls:
                     return
                 try:
-                    self.wfile.write("data: %s\n\n" % event.pathname)
+                    self.wfile.write(b"data: %s\n\n" % event.pathname.encode())
                 except:
                     pass
             live_reload_register(_handle)
@@ -1622,7 +1635,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             live_reload_remove(_handle)
             self.send_error("400 Bad request", force_close=True)
         elif self.path == "/.well-known/live-reload/lr.js":
-            self.reply_with_file_like_object(StringIO.StringIO(self.LIVE_RELOAD_JS), -1, "application/javascript", "200 Ok")
+            self.reply_with_file_like_object(io.BytesIO(self.LIVE_RELOAD_JS.encode()), -1, "application/javascript", "200 Ok")
             return
         self.send_error("404 Not found")
 
@@ -1753,7 +1766,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
         if self.path.startswith("/.well-known/directory-icons/"):
             load_icon = self.path[18:]
-            output = StringIO.StringIO()
+            output = io.BytesIO()
             def send_data(buf, data=None):
                     output.write(buf)
                     return True
@@ -1764,7 +1777,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 icon_theme.load_icon(load_icon, 32, 0).save_to_callback(send_data, "png", {}, None)
             else:
                 output.write(base64.b64decode(self.DIRECTORY_ICONS[load_icon if load_icon in self.DIRECTORY_ICONS else "application-octet-stream"]))
-            self.reply_with_file_like_object(output, output.pos, "image/png", "200 Ok", { "Cache-Control": "public, max-age=31104000" })
+            size = output.tell()
+            output.seek(0)
+            self.reply_with_file_like_object(output, size, "image/png", "200 Ok", { "Cache-Control": "public, max-age=31104000" })
             return
 
         if self.path.startswith("/.well-known/live-reload/") and self.options["live_reload_enabled"]:
@@ -1834,7 +1849,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             self._http2_dynamic_header_table = []
         headers = []
 
-        data = map(ord, data)
+        data = list(data)
 
         def _consume_int(prefix):
             prefix_bits = (1<<prefix) - 1
@@ -1860,7 +1875,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             for i in range(str_len):
                 data.pop(0)
             if not is_huffmann:
-                return "".join(map(chr, str_data))
+                return b"".join(str_data)
             prefix = 8
             output = []
             while str_data:
@@ -1874,9 +1889,9 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                         if asc == 256:
                             str_data = ""
                             break
-                        output.append(chr(asc))
+                        output.append(asc)
                         if bit_length > prefix:
-                            str_data = str_data[1 + (bit_length - prefix) / 8:]
+                            str_data = str_data[int(1 + (bit_length - prefix) / 8):]
                             prefix = 8 - (bit_length - prefix) % 8
                         elif bit_length == prefix:
                             str_data = str_data[1:]
@@ -1886,7 +1901,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                         break
                 else:
                     break
-            return "".join(output)
+            return bytes(output)
 
         def _get_table(header_id):
             if header_id <= len(self.HTTP2_HEADERS_STATIC_TABLE):
@@ -1930,38 +1945,38 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             key = key.lower()
             def _encode_int(integer, prefix=8):
                 if integer < (1 << prefix) - 1:
-                    return chr(integer)
+                    return bytes((integer,))
                 out = [ chr((1<<prefix) - 1) ]
                 integer -= ((1<<prefix) - 1)
                 while integer >= 128:
-                    out.append(chr(128 + (integer % 128)))
+                    out.append(128 + (integer % 128))
                     integer /= 128
-                out.append(chr(integer))
-                return "".join(out)
+                out.append(integer)
+                return b"".join(out)
 
             def _encode_str_literal(st):
                 return _encode_int(len(st), 7) + st
 
-            return "".join(("\0", _encode_str_literal(key), _encode_str_literal(value)))
+            return b"".join((b"\0", _encode_str_literal(key), _encode_str_literal(value)))
 
-        header_lines = headers.split("\r\n")
+        header_lines = headers.split(b"\r\n")
         output = []
 
         first_line = header_lines[0].split()
         status_code = first_line[1]
 
-        output.append(_encode_header(":status", status_code))
+        output.append(_encode_header(b":status", status_code))
 
         for line in header_lines[1:]:
-            if ":" in line:
-                key, value = line.split(":", 1)
+            if b":" in line:
+                key, value = line.split(b":", 1)
                 output.append(_encode_header(key.strip(), value.strip()))
             else:
                 line = line.strip()
                 if line:
                     output.append(_encode_header(key.strip(), line))
 
-        return "".join(output)
+        return b"".join(output)
 
 
     def http2_initiate(self, stream_id, stream):
@@ -1978,7 +1993,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
         def _communicate(stream_id, sock):
             state = 0
-            str_buffer = ""
+            str_buffer = b""
             while True:
                 try:
                     data = sock.recv(10240)
@@ -1989,10 +2004,10 @@ class HttpHandler(SocketServer.StreamRequestHandler):
 
                 if state == 0:
                     str_buffer += data
-                    if "\r\n\r\n" not in str_buffer:
+                    if b"\r\n\r\n" not in str_buffer:
                         continue
                     state = 1
-                    headers, data = str_buffer.split("\r\n\r\n", 1)
+                    headers, data = str_buffer.split(b"\r\n\r\n", 1)
                     headers_send = self.hpack_encode(headers)
                     length_hi = (len(headers_send) & 0xff0000) >> 16
                     length_lo = len(headers_send) & 0xffff
@@ -2015,15 +2030,15 @@ class HttpHandler(SocketServer.StreamRequestHandler):
         stream["handler_socket"] = sock1
 
         hdict = dict(stream["headers"])
-        http11_headers =("%s %s HTTP/1.1\r\nConnection: close\r\nHost: %s\r\n%s\r\n\r\n" % (hdict[":method"], hdict[":path"], hdict[":authority"], "\r\n".join(("%s: %s" % (key, value) for key, value in stream["headers"] if not key.startswith(":")))))
+        http11_headers =(b"%s %s HTTP/1.1\r\nConnection: close\r\nHost: %s\r\n%s\r\n\r\n" % (hdict[b":method"], hdict[b":path"], hdict[b":authority"], b"\r\n".join((b"%s: %s" % (key, value) for key, value in stream["headers"] if not key.startswith(b":")))))
 
         sock1.send(http11_headers)
 
     def handle_http2(self):
         self.log(logging.DEBUG, "This is a http/2 request.")
-        self.wfile.write("\0\0\0\x04\0\0\0\0\0") # Empty SETTINGS frame
+        self.wfile.write(b"\0\0\0\x04\0\0\0\0\0") # Empty SETTINGS frame
         preface = self.rfile.read(24)
-        expected_preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+        expected_preface = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
         assert preface == expected_preface
 
         HTTP2_FRAME_TYPES = ( "DATA", "HEADERS", "PRIORITY", "RST_STREAM", "SETTINGS", "PUSH_PROMISE", "PING", "GOAWAY", "WINDOW_UPDATE", "CONTINUATION" )
@@ -2068,7 +2083,7 @@ class HttpHandler(SocketServer.StreamRequestHandler):
             elif frame_type == 4: # SETTINGS
                 # TODO Actually handle settings
                 if not frame_flags & 1:
-                    self.wfile.write("\0\0\0\x04\1\0\0\0\0") # Empty SETTINGS frame with ACK flag set
+                    self.wfile.write(b"\0\0\0\x04\1\0\0\0\0") # Empty SETTINGS frame with ACK flag set
             elif frame_type == 6: # PING
                 self.wfile.write(struct.pack("!BHBBI", frame_length_hi, frame_length_lo, 6, 1, frame_sid) + data) # PONG, same frame with ACK flag set
             else:
@@ -2095,16 +2110,16 @@ class HttpHandler(SocketServer.StreamRequestHandler):
                 break
             if not self.do_keep_alive:
                 break
-            elif not self.http_version or self.http_version.lower() == "http/1.0":
+            elif not self.http_version or self.http_version.lower() == b"http/1.0":
                 break
 
     def finish(self):
         try:
-            SocketServer.StreamRequestHandler.finish(self)
+            socketserver.StreamRequestHandler.finish(self)
         except:
             pass
 
-class TelnetHandler(SocketServer.StreamRequestHandler):
+class TelnetHandler(socketserver.StreamRequestHandler):
     "A simple shell server"
     logger  = logging.getLogger("telnet")
 
@@ -2114,7 +2129,7 @@ class TelnetHandler(SocketServer.StreamRequestHandler):
         self.client_address = client_address
         self.logger.log(logging.INFO, "Incoming connection", { "ip": self.client_address[0] })
         self.options = options
-        SocketServer.StreamRequestHandler.__init__(self, request, client_address, server)
+        socketserver.StreamRequestHandler.__init__(self, request, client_address, server)
 
     def _read_login(self, echo=True):
         user = ""
@@ -2122,46 +2137,46 @@ class TelnetHandler(SocketServer.StreamRequestHandler):
             data = self.connection.recv(1)
             if not data:
                 break
-            if data == "\xff":
+            if data == b"\xff":
                 self.connection.recv(2)
                 continue
-            if data == "\x7f":
+            if data == b"\x7f":
                 if user:
                     user = user[:-1]
                     if echo:
-                        self.connection.send("\b \b")
+                        self.connection.send(b"\b \b")
                 continue
-            if data == "\r":
-                self.connection.send("\n\r")
+            if data == b"\r":
+                self.connection.send(b"\n\r")
                 break
-            if ord(data) < 32 or ord(data) > 250:
+            if data[0] < 32 or data[0] > 250:
                 continue
-            user += data
+            user += data.decode()
             if echo:
                 self.connection.send(data)
         return user
 
     def handle_authentication(self, correct_user, correct_password):
-        self.connection.send("\033[1;32miwebd telnet server\033[0m\n\n\r\033[1m%s\033[0m login: " % socket.gethostname())
+        self.connection.send(b"\033[1;32miwebd telnet server\033[0m\n\n\r\033[1m%s\033[0m login: " % socket.gethostname().encode())
         user = self._read_login()
         if not user:
             return False
-        self.connection.send("password: ")
+        self.connection.send(b"password: ")
         password = self._read_login(False)
         if not password:
             return False
         if (correct_user and user != correct_user) or password != correct_password:
             time.sleep(2)
-            self.connection.send("\n\n\r\033[31mLogin incorrect.\033[0m\r\n")
+            self.connection.send(b"\n\n\r\033[31mLogin incorrect.\033[0m\r\n")
             time.sleep(1)
             return False
         else:
             time.sleep(1)
-            self.connection.send("\r\n")
+            self.connection.send(b"\r\n")
             return True
 
     def handle(self):
-        self.connection.send("\xff\xfb\x01\xff\xfb\x03") # IAC - Will - echo - IAC - Will - supress go ahead
+        self.connection.send(b"\xff\xfb\x01\xff\xfb\x03") # IAC - Will - echo - IAC - Will - supress go ahead
 
         if "pass" in self.options and self.options["pass"]:
             if not self.handle_authentication(self.options["user"], self.options["pass"]):
@@ -2181,7 +2196,7 @@ class TelnetHandler(SocketServer.StreamRequestHandler):
 
         while True:
             data = self.connection.recv(10240)
-            while data and data[0] == "\xff":
+            while data and data[0] == b"\xff":
                 command = data[:3]
                 data = data[3:]
                 self.logger.debug("Received command: %(command)d %(parameter)d", {"ip": self.client_address[0], "command": ord(command[1]), "parameter": ord(command[2])})
@@ -2237,14 +2252,7 @@ def format_size(size):
     return "%2.2f %sBi" % (size, prefix)
 
 def file_read(fileobj, amount):
-    "Safe way to read from file objects that returns '' on non-blocking sockets if no data is available"
-    if type(fileobj) is not socket._fileobject and hasattr(fileobj, "fileno"):
-        try:
-            return os.read(fileobj.fileno(), amount)
-        except io.UnsupportedOperation:
-            return fileobj.read(amount)
-    else:
-        return fileobj.read(amount)
+    return fileobj.read(amount)
 
 def file_write(fileobj, data):
     tries = 100
@@ -2276,7 +2284,7 @@ def fd_copy(source_file, target_file, length):
         if has_ctypes:
             try:
                 source_file.fileno()
-                if os.fstat(target_file.fileno()).st_mode & 0140000: # S_IFSOCK
+                if os.fstat(target_file.fileno()).st_mode & 0o140000: # S_IFSOCK
                     # Source file has an fd, target is a socket, and ctypes is available - use sendfile!
                     original_length = length
                     while length > 0:
@@ -2331,10 +2339,13 @@ def setup_tcp_server_socket(base_port=1234, address_family=socket.AF_INET):
 def wait_for_signal(servers, extra_thread_count=0, script_file_name=__file__):
     """Infinite loop that intercepts <C-c>, closes the servers if it catches it
     once and kills the process the second time."""
-    signal_count = [ 0 ]
+    evt = threading.Event()
+    signal_count = 0
     def _signal_handler(signum, frame):
-        signal_count[0] += 1
-        if signal_count[0] == 1:
+        nonlocal signal_count
+        evt.set()
+        signal_count += 1
+        if signal_count == 1:
             logging.warn("Signal received. Shutting down server sockets.")
             for server in servers:
                 if not server:
@@ -2345,7 +2356,7 @@ def wait_for_signal(servers, extra_thread_count=0, script_file_name=__file__):
                 del server.socket
             if signum == signal.SIGUSR1:
                 time.sleep(.5)
-                print
+                print()
                 os.closerange(3, os.sysconf("SC_OPEN_MAX") or 1024)
                 os.execv(script_file_name, sys.argv)
                 sys.exit(1)
@@ -2356,10 +2367,9 @@ def wait_for_signal(servers, extra_thread_count=0, script_file_name=__file__):
     oldint = signal.signal(signal.SIGINT, _signal_handler)
     oldhup = signal.signal(signal.SIGHUP, _signal_handler)
     oldusr = signal.signal(signal.SIGUSR1, _signal_handler)
-    while signal_count[0] == 0:
-        time.sleep(3600)
+    evt.wait()
     while threading.active_count() > 1 + extra_thread_count:
-        print "\r\033[JWaiting for %d remaining conntections to terminate." % (threading.active_count() - 1, ),
+        print("\r\033[JWaiting for %d remaining conntections to terminate." % (threading.active_count() - 1 - extra_thread_count, ), end=' ')
         sys.stdout.flush()
         time.sleep(1)
     signal.signal(signal.SIGINT, oldint)
@@ -2419,7 +2429,7 @@ def cached_remote_resource(url):
     if not os.access(cache_file, os.R_OK):
         logger = logging.getLogger("cache")
         logger.info("Loading %(url)s into cache at %(path)s", {"url": url, "path": cache_file})
-        urllib.urlretrieve(url, cache_file)
+        urllib.request.urlretrieve(url, cache_file)
     return open(cache_file)
 
 _live_reload_callbacks = []
@@ -2532,8 +2542,8 @@ def iterate_interfaces():
     libc.getifaddrs(ctypes.byref(ifap))
     ptr = ifap
     while ptr:
-        if_name = ptr.contents.ifa_name
-        addr = ctypes.c_buffer("", 255)
+        if_name = ptr.contents.ifa_name.decode()
+        addr = ctypes.c_buffer(b"", 255)
         if not ptr.contents.ifa_addr:
             ptr = ctypes.cast(ptr.contents.ifa_next, ptype)
             continue
@@ -2542,7 +2552,7 @@ def iterate_interfaces():
             ptr = ctypes.cast(ptr.contents.ifa_next, ptype)
             continue
         libc.getnameinfo(ptr.contents.ifa_addr, 16 if addr_type == 2 else 30, addr, 255, ctypes.cast(0, ctypes.c_char_p), 0, 1)
-        ip = addr.value
+        ip = addr.value.decode()
         ptr = ctypes.cast(ptr.contents.ifa_next, ptype)
         yield if_name, ip
     libc.freeifaddrs(ifap)
@@ -2570,7 +2580,7 @@ def dlna_handler(ips, name, additional_options, port, avahi_name_http, avahi_nam
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
         for announcement in announcements:
             announcement = "NOTIFY * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nNTS: ssdp:alive\r\n" + announcement
-            sock.sendto(announcement.format(ip=ip, port=port[1]), ("239.255.255.250", 1900))
+            sock.sendto(announcement.format(ip=ip, port=port[1]).encode(), ("239.255.255.250", 1900))
 
     for ip in ips:
         if ":" in ip:
@@ -2586,6 +2596,7 @@ def dlna_handler(ips, name, additional_options, port, avahi_name_http, avahi_nam
         ifsocks[sock] = ip
 
     log = logging.getLogger()
+    ip_to_source = {}
 
     while ifsocks:
         readable, _, _ = select.select(list(ifsocks.keys()), [], [], 9999)
@@ -2594,11 +2605,20 @@ def dlna_handler(ips, name, additional_options, port, avahi_name_http, avahi_nam
             if not dgram:
                 del ifsocks[sock]
 
-            if dgram.startswith("M-SEARCH"):
-                log.debug("Replying to M-SEARCH from %s" % (addr,))
+            source = ip_to_source.get(addr[0])
+            if not source:
+                tsock = socket.socket(type=socket.SOCK_DGRAM)
+                tsock.connect(addr)
+                source = tsock.getsockname()[0]
+                tsock.close()
+                del tsock
+                ip_to_source[addr[0]] = source
+
+            if dgram.startswith(b"M-SEARCH"):
+                log.debug("Replying to M-SEARCH from %s from %s" % (addr, source))
                 for announcement in announcements:
                     r_announcement = "HTTP/1.1 200 OK\r\nExt: \r\n" + announcement
-                    sock.sendto(r_announcement.format(ip="192.168.0.3", port=port[1]).replace("NT:", "ST:"), addr)
+                    sock.sendto(r_announcement.format(ip=source, port=port[1]).replace("NT:", "ST:").encode(), addr)
 
 def main():
     user = False
