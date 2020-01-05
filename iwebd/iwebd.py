@@ -1029,7 +1029,7 @@ class HttpHandler(socketserver.StreamRequestHandler):
                             self.eof = True
                         return ret
                     elif "transfer-encoding" in self.req.headers:
-                        if self.req.headers["transfer-encoding"][0] is not "chunked":
+                        if self.req.headers["transfer-encoding"][0] != "chunked":
                             raise ValueError("Unsupported transfer encoding: %s" % self.req.headers["transfer-encoding"][0])
                         while size is None or size > sum(map(len, self.chunk_buffer)):
                             chunk_size = int(self.rfile.readline(), 16)
