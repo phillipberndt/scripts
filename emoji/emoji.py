@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # encoding: utf-8
 #
 # Simple script to let the user select an emoji or other Unicode symbol and
@@ -27,7 +27,7 @@ import ctypes
 EMOJI_LIST_URL    = ( #"http://www.unicode.org/emoji/charts/full-emoji-list.html",
                       "http://www.unicode.org/emoji/charts-beta/full-emoji-list.html",
                     )
-EMOJI_LIST_REGEXP = ur"""(?sx)<tr>(?:(?!</tr>|<img).)+                       # At the start of an emoji definition
+EMOJI_LIST_REGEXP = r"""(?sx)<tr>(?:(?!</tr>|<img).)+                       # At the start of an emoji definition
                         <img(?:(?!</tr>|<img).)+                             # Skip the first image (ugly reference chart picture)
                         # Extract the data from the 2nd (Apple) reference image instead:
                         <img\ alt='(?P<codepoint>[^']+)'[^>]+src='(?P<image>data:image/[^']+)'[^>]*>(?:(?!</tr>).)*
@@ -55,7 +55,7 @@ PDF_SYMBOLS_URL = (
                     "http://unicode.org/charts/PDF/U2300.pdf",
                   )
 
-PDF_SYMBOLS_REGEXP = ur"""(?sm)^[0-9A-F]{2,} (?P<codepoint>.) (?P<explaination>[A-Z ]+)(?:\s+^= (?P<annotations>(?:(?!\n).)+))?"""
+PDF_SYMBOLS_REGEXP = r"""(?sm)^[0-9A-F]{2,} (?P<codepoint>.) (?P<explaination>[A-Z ]+)(?:\s+^= (?P<annotations>(?:(?!\n).)+))?"""
 
 def get_emoji_cache():
     """
@@ -76,7 +76,7 @@ def get_emoji_cache():
         for url in EMOJI_LIST_URL:
             emoji_list = requests.get(url).text
             for match in re.finditer(EMOJI_LIST_REGEXP, emoji_list):
-                key = match.group("codepoint").encode("utf8")
+                key = match.group("codepoint")
                 data = match.groupdict()
                 data["annotations"] = []
                 data["image"] = base64.b64decode(data["image"][data["image"].find("base64,") + 7:])
@@ -86,7 +86,7 @@ def get_emoji_cache():
             symbols_data = requests.get(url).content
             symbols_text = subprocess.Popen(["pdftotext", "-", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE).communicate(symbols_data)[0].decode("utf8")
             for match in re.finditer(PDF_SYMBOLS_REGEXP, symbols_text):
-                key = match.group("codepoint").encode("utf8")
+                key = match.group("codepoint")
                 data = { "name":  match.group("explaination").lower(), "codepoint": match.group("codepoint"),
                          "annotations": [ x.strip() for x in match.group("annotations").split(",") ] if match.group("annotations") else [], "image": None }
                 # Symbols from PDFs never overwrite emoji's with images
@@ -118,7 +118,7 @@ def xlib_send_string(text, window=None):
         Send a string to a window by remapping the keyboard. Slow, but works
         with all Unicode characters.
     """
-    if type(text) is not unicode:
+    if type(text) is not str:
         text = text.decode("utf8")
     if not window:
         window = xlib_get_active_window()
@@ -178,7 +178,7 @@ def create_window():
             except:
                 return False
 
-            window.retval = codepoint.decode("utf8")
+            window.retval = codepoint
             window.hide()
             GObject.idle_add(Gtk.main_quit, None)
 
@@ -197,7 +197,7 @@ def create_window():
     stacker.pack_start(search_bar, False, False, 1)
 
     tree_model = Gtk.ListStore(GdkPixbuf.Pixbuf, GObject.TYPE_STRING, GObject.TYPE_STRING, GObject.TYPE_STRING)
-    for emoji in sorted(get_emoji_cache().values(), key=lambda x: x["name"]):
+    for emoji in sorted(list(get_emoji_cache().values()), key=lambda x: x["name"]):
         if emoji["image"]:
             loader = GdkPixbuf.PixbufLoader()
             loader.write(emoji["image"])
