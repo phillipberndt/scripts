@@ -1875,7 +1875,7 @@ class HttpHandler(socketserver.StreamRequestHandler):
             for i in range(str_len):
                 data.pop(0)
             if not is_huffmann:
-                return b"".join(str_data)
+                return bytes(str_data)
             prefix = 8
             output = []
             while str_data:
