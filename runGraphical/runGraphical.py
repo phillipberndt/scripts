@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # vim:fileencoding=iso-8859-1:ft=python
 #
 """
@@ -17,6 +17,12 @@
 
 	lines beginning with # are ignored.
 """
+import gi
+
+
+gi.require_version('Gtk', '3.0')
+
+
 from gi.repository import Gtk as gtk
 from gi.repository import Gdk as gdk
 import os
@@ -67,7 +73,7 @@ try:
 				raise Exception("Configuration error")
 		commands[command] = execute.strip()
 except:
-	print "Configuration error in ~/.runGraphical.config in character %d" % n
+	print("Configuration error in ~/.runGraphical.config in character %d" % n)
 	sys.exit(0)
 
 # Show dialog
