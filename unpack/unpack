@@ -238,7 +238,7 @@ class ZIPFile(filetype): # {{{
 					if not os.path.isdir(targetDirectory):
 						os.makedirs(targetDirectory)
 					if nodeTitle[-1] != "/":
-						targetFile = open(os.path.join(destination, node), "w")
+						targetFile = open(os.path.join(destination, node), "wb")
 						targetFile.write(fileObject.read(nodeTitle))
 						targetFile.close()
 				del fileObject
@@ -330,13 +330,13 @@ class MAKESELFFile(filetype): # {{{
 		if os.system("grep -q Makeself %s" % se(cls.file)) != 0:
 			sout("bad", "This does not look like a Makeself archive")
 			return False
-		archive = open(cls.file, "r")
+		archive = open(cls.file, "rb")
 		scriptData = ""
 		while True:
 			while True:
 				byte = archive.read(1)
 				scriptData += byte
-				if byte == "\n":
+				if byte == b"\n":
 					break
 				if not byte:
 					break
@@ -345,19 +345,19 @@ class MAKESELFFile(filetype): # {{{
 			if not byte:
 				sout("bad", "Binary data stream not found.")
 				return False
-			if byte != "\t" and byte != "\r" and byte != "\n" and (ord(byte) < 32 or ord(byte) > 126):
+			if byte != b"\t" and byte != b"\r" and byte != b"\n" and (ord(byte) < 32 or ord(byte) > 126):
 				archive.seek(-1, 1)
 				break
-		compressionType = re.search('COMPRESS="([^"]+)"', scriptData)
+		compressionType = re.search(b'COMPRESS="([^"]+)"', scriptData)
 		if compressionType == None:
-			compressionType = re.search(r"Compression: (\S+)", scriptData)
+			compressionType = re.search(b"Compression: (\\S+)", scriptData)
 			if compressionType == None:
 				sout("bad", "Failed to extract compression type")
 				return False
 		compressionType = compressionType.group(1)
-		if compressionType == "Unix" or compressionType == "gzip":
+		if compressionType == b"Unix" or compressionType == b"gzip":
 			flags = "z"
-		elif compressionType == "bzip2":
+		elif compressionType == b"bzip2":
 			flags = "j"
 		else:
 			sout("bad", "This compression type is not supported right now.")
@@ -382,16 +382,16 @@ class RPMFile(filetype): # {{{
 		# We parse the RPM ourselves
 		# See http://www.rpm.org/max-rpm/s1-rpm-file-format-rpm-file-format.html for RPM file structure
 		sout("good", "Searching rpm for archive file offset")
-		archiveHead = open(cls.file).read(1024**2 * 2)
+		archiveHead = open(cls.file, "rb").read(1024**2 * 2)
 		# Check if this realls is a RPM file
-		if archiveHead[:4] != "\xed\xab\xee\xdb":
+		if archiveHead[:4] != b"\xed\xab\xee\xdb":
 		    sout("bad", "This does not look like an RPM file")
 		    return False
 		# Skip Lead
 		offset = 96
 		# Skip the Header structures
 		header_count = 0
-		while archiveHead[offset:offset + 3] == "\x8e\xad\xe8" and header_count < 2:
+		while archiveHead[offset:offset + 3] == b"\x8e\xad\xe8" and header_count < 2:
 			header_count += 1
 			offset += 3 + 1 + 4
 			entries, length = struct.unpack(">II", archiveHead[offset:offset + 8])
@@ -402,14 +402,17 @@ class RPMFile(filetype): # {{{
 		# Unpack
 		if offset > -1:
 			sout("good", "Found archive offset")
-			if archiveHead[offset:offset+2] == "\x1f\x8b":
+			if archiveHead[offset:offset+2] == b"\x1f\x8b":
 				return os.system("dd ibs=%d skip=1 if=%s 2>/dev/null | gzip -d | (cd %s && cpio -i --no-absolute-filenames --make-directories)" % (offset, se(cls.file), se(destination))) == 0
-			elif archiveHead[offset:offset+6] == "\xFD\x37\x7A\x58\x5A\x00":
+			elif archiveHead[offset:offset+6] == b"\xFD\x37\x7A\x58\x5A\x00":
 				return os.system("dd ibs=%d skip=1 if=%s 2>/dev/null | xz -d | (cd %s && cpio -i --no-absolute-filenames --make-directories)" % (offset, se(cls.file), se(destination))) == 0
+			elif archiveHead[offset:offset+4] == b"(\xb5/\xfd":
+				return os.system("dd ibs=%d skip=1 if=%s 2>/dev/null | zstd -d | (cd %s && cpio -i --no-absolute-filenames --make-directories)" % (offset, se(cls.file), se(destination))) == 0
 			else:
 				sout("warn", "Unknown archive format: %r. Falling back to recursive unpack." % (archiveHead[offset:offset+4]))
 				temporary_archive = "%s/package.compressed" % destination
 				os.system("dd ibs=%d skip=1 if=%s 2>/dev/null > %s" % (offset, se(cls.file), se(temporary_archive)))
+				os.system("file %s" % se(temporary_archive))
 				return recursive_unpack(destination, temporary_archive)
 		else:
 			sout("bad", "Failed to find archive offset")
@@ -437,7 +440,7 @@ class MIMEFile(filetype): # {{{
 			for mailData in mailData.walk():
 				fileName = mailData.get_filename(False)
 				if fileName:
-					targetFile = open("%s/%s" % (destination, os.path.basename(fileName)), "w")
+					targetFile = open("%s/%s" % (destination, os.path.basename(fileName)), "wb")
 					targetFile.write(mailData.get_payload(decode=True))
 					targetFile.close()
 			return True
@@ -514,7 +517,7 @@ class ZStandard(filetype):# {{{
 	@classmethod
 	def canHandle(cls, file):
 		try:
-			if open(file).read(4) == "\x28\xB5\x2F\xFD":
+			if open(file, "rb").read(4) == b"\x28\xB5\x2F\xFD":
 				return True
 		except:
 			pass
