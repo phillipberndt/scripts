@@ -596,16 +596,12 @@ class ChunkWrapper(io.BufferedIOBase):
        self.offset = 0
 
     def __enter__(self):
-        if hasattr(self.fileobj, "__enter__"):
-            self.fileobj.__enter__()
         return self
 
     def __exit__(self, type, value, traceback):
         if not self.finalized:
             self.fileobj.write(b"0\r\n\r\n")
             self.finalized = True
-        if hasattr(self.fileobj, "__exit__"):
-            self.fileobj.__exit__(type, value, traceback)
 
     def write(self, data):
         assert not self.finalized
