@@ -54,45 +54,25 @@ cd ..
 # Link binaries
 [ -d bin ] || mkdir bin
 cd bin
-for BINARY in gdo/gdo nonroot_apt/nonroot_apt.py passwrd/passwrd.py runGraphical/runGraphical.py todo/todo unpack/unpack venv/venv/venv.py pydoce/pydoce iwebd/iwebd.py on/on.py pskill/pskill.py sshproxy/sshp.py paxel/paxel.py emoji/emoji.py colors/color_codes errno/errno online_tools/*(x); do
+for BINARY in gdo/gdo passwrd/passwrd.py unpack/unpack pydoce/pydoce on/on.py pskill/pskill.py sshproxy/sshp.py paxel/paxel.py emoji/emoji.py errno/errno; do
 	[ -e ${BINARY:t:r} ] || ln -s ../_scripts/$BINARY ${BINARY:t:r}
 done
 cd ..
 
 # Initialize Python virtual environment
-if ! [ -e bin/python2 ]; then
-	wget -O virtualenv https://raw.github.com/pypa/virtualenv/master/virtualenv.py
-	chmod a+x virtualenv
-	./virtualenv --system-site-packages .
-	rm -f virtualenv
-fi
-
-if ! [ -e bin/easy_setup ]; then
-	wget -O ez_setup.py https://bootstrap.pypa.io/ez_setup.py
-	./bin/python2 ez_setup.py
-	rm -f ez_setup.py
-fi
-
-if ! [ -e bin/pip2 ]; then
 	[ -e get-pip.py ] || wget -O get-pip.py https://bootstrap.pypa.io/get-pip.py
-	./bin/python2 get-pip.py
-fi
 
-if ! [ -e bin/virtualenv ]; then
-	bin/pip2 install virtualenv
-fi
-
-bin/pip2 install ipython requests flask jedi pexpect psutil
-
-if ! [ -e bin/python3 ]; then
-	if python3 -m venv --system-site-packages .; then
-		[ -e bin/pip3 ] || ./bin/python3 get-pip.py
-		bin/pip3 install ipython requests flask jedi pexpect psutil
+if ! [ -e bin/ipython3 ]; then
+	PIPBIN=pip3
+	if ! which $PIPBIN; then
+		wget -O get-pip.py https://bootstrap.pypa.io/get-pip.py
+		python3 get-pip.py --user
+		rm -f get-pip.py
+		PIPBIN=bin/pip3
 	fi
+	$PIPBIN install ipython requests flask jedi pexpect psutil
 fi
 
-rm -f get-pip.py
-rm -f bin/pip
 cd ..
 
 # Initialize zsh
@@ -121,16 +101,6 @@ for FILE in .local/_scripts/dotfiles/*; do
 	[ -e .${FILE:t} ] || ln -s $FILE .${FILE:t}
 done
 
-# Initialize Perl CPAN
-if ! [ -e .local/bin/cpanm ]; then
-	wget -O .local/bin/cpanm http://cpanmin.us
-	chmod a+x .local/bin/cpanm
-	.local/bin/cpanm -l `pwd`/.local local::lib
-	.local/bin/cpanm -l `pwd`/.local Term::ProgressBar
-	.local/bin/cpanm -l `pwd`/.local Net::Netmask
-	.local/bin/cpanm -l `pwd`/.local Term::Size
-fi
-
 # Initialize vim
 if [ -z "$IS_UPDATE" ]; then
 	[ -e .vimrc ] && mv .vimrc vimrc-old
@@ -146,21 +116,27 @@ else
 	cd ..
 fi
 
-# Initialize fzf
-if which go &>/dev/null; then
-	cd .local
-	git clone https://github.com/junegunn/fzf
-	cd fzf
-	make
-	if [ -e fzf ]; then
-		rm -f ../bin/fzf
-		mv target/fzf* ../bin/fzf
-		rm -f ~/.zsh/scripts/fzf.zsh
-		mv shell/key-bindings.zsh ~/.zsh/scripts/fzf.zsh
-		chmod +x ~/.zsh/scripts/fzf.zsh
-	fi
-	cd ..
-	rm -rf fzf
-else
-	echo "\033[32mgo is not installed; skipping fzf\033[0m"
-fi
+# Initialize or update fzf
+cd .local
+mkdir -p tmp
+cd tmp
+version=$(wget -qO - https://github.com/junegunn/fzf/releases  | grep -oE 'fzf-[^"]+-linux_amd64.tar.gz' | cut -d- -f2 | head -n1)
+wget -O fzf https://github.com/junegunn/fzf/releases/download/$version/fzf-$version-linux_amd64.tar.gz
+tar xzf fzf
+mv -f fzf ../bin
+cd ..
+rm -rf tmp
+cd ..
+wget -O ~/.zsh/scripts/fzf.zsh https://raw.githubusercontent.com/junegunn/fzf/master/shell/key-bindings.zsh
+
+# Initialize or update iwebd
+cd .local
+mkdir -p tmp
+cd tmp
+version=$(wget -qO - https://github.com/phillipberndt/iwebd/releases  | grep -oE 'iwebd-[^"]+-linux-amd64.tar.gz' | cut -d- -f2 | head -n1)
+wget -O iwebd https://github.com/phillipberndt/iwebd/releases/download/$version/iwebd-$version-linux-amd64.tar.gz
+tar xzf iwebd
+mv -f iwebd ../bin
+cd ..
+rm -rf tmp
+cd ..
