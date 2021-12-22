@@ -140,3 +140,15 @@ mv -f iwebd ../bin
 cd ..
 rm -rf tmp
 cd ..
+
+# Initialize or update lf
+cd .local
+mkdir -p tmp
+cd tmp
+version=$(wget -qO - https://github.com/gokcehan/lf/releases  | grep -oE '/r[0-9]+/' | head -n1)
+wget -O lf https://github.com/gokcehan/lf/releases/download/$version/lf-linux-amd64.tar.gz
+tar xzf lf
+mv -f lf ../bin
+cd ..
+rm -rf tmp
+cd ..
