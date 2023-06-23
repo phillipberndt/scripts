@@ -119,6 +119,12 @@ int main(int argc, char *argv[]) {
 	XClearWindow(display, w);
 	XSync(display, False);
 
+	XGCValues values;
+	GC gc = XCreateGC(display, w, 0, &values);
+	XSetForeground(display, gc, WhitePixel(display, 0));
+	XSetBackground(display, gc, WhitePixel(display, 0));
+	XSetFillStyle(display, gc, FillSolid);
+
 	// Disable screen
 	if(fullscreen == 1) {
 		DPMSForceLevel(display, DPMSModeOff);
@@ -133,6 +139,7 @@ int main(int argc, char *argv[]) {
 		// Read password
 		passwordBufferLength = 0;
 		while(True) {
+			int changed = 0;
 			XNextEvent(display, &xev);
 
 			if(xev.type != 2 /* KeyPress */) {
@@ -140,8 +147,11 @@ int main(int argc, char *argv[]) {
 			}
 
 			KeySym keysym = XLookupKeysym((XKeyEvent *)&xev, 0);
-			if(keysym == XK_BackSpace && passwordBufferLength > 0) {
-				passwordBufferLength--;
+			if(keysym == XK_BackSpace) {
+				if(passwordBufferLength > 0) {
+					passwordBufferLength--;
+					changed = 1;
+				}
 			}
 			else if(keysym == XK_Return) {
 				break;
@@ -152,9 +162,16 @@ int main(int argc, char *argv[]) {
 				if(passwordBufferLength + len < sizeof(passwordBuffer)) {
 					memcpy(passwordBuffer + passwordBufferLength, inputBuffer, len);
 					passwordBufferLength += len;
+					changed = 1;
 				}
 			}
-			
+
+			if(changed) {
+				XClearWindow(display, w);
+				for(int i = 0; i<passwordBufferLength; i++)
+					XDrawRectangle(display, w, gc, 20 + i * 40, 20, 20, 20);
+				XSync(display, False);
+			}
 		}
 		passwordBuffer[passwordBufferLength] = 0;
 
