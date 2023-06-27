@@ -1,4 +1,4 @@
-CFLAGS=-O3
+CFLAGS=-O3 -Wall -Wextra
 LDLIBS=-lX11 -lpam -lXext
 PREFIX=/usr/bin/
 

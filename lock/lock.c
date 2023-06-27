@@ -49,7 +49,7 @@ static unsigned long colors[] = {
 	54527ul, 43519ul, 32767ul, 21759ul, 11007ul, 255ul, 2752767ul, 5505279ul, 8323327ul, 11141375ul, 13893887ul, 16711935ul, 16711892ul, 16711850ul, 16711807ul, 16711765ul, 16711722ul,
 };
 
-int pam_nocomm(int n, const struct pam_message **query, struct pam_response **resp, void *data) {
+int pam_nocomm(int __attribute__((unused)) n, const struct pam_message __attribute__((unused)) **query, struct pam_response **resp, void __attribute__((unused)) *data) {
 	// PAM responder (responds with the password the user entered)
 	*resp = (struct pam_response *)malloc(sizeof(struct pam_response));
 	(*resp)->resp_retcode = 0;
@@ -102,7 +102,7 @@ int main(int argc, char *argv[]) {
 	XMapWindow(display, w);
 	XRaiseWindow(display, w);
 	XSync(display, False);
-	
+
 	// Wait for the WM to settle..
 	sleep(1);
 
@@ -164,7 +164,7 @@ int main(int argc, char *argv[]) {
 			else if(XLookupString((XKeyEvent *)&xev, inputBuffer, 4, NULL, NULL) == 1) {
 				int len = strlen(inputBuffer);
 
-				if(passwordBufferLength + len < sizeof(passwordBuffer)) {
+				if(passwordBufferLength + len < (int)sizeof(passwordBuffer)) {
 					memcpy(passwordBuffer + passwordBufferLength, inputBuffer, len);
 					passwordBufferLength += len;
 					changed = 1;
