@@ -44,6 +44,11 @@
 
 char passwordBuffer[255];
 
+static unsigned long colors[] = {
+	16711680ul, 16722432ul, 16733184ul, 16744192ul, 16755200ul, 16765952ul, 16776960ul, 13958912ul, 11206400ul, 8388352ul, 5570304ul, 2817792ul, 65280ul, 65322ul, 65365ul, 65407ul, 65449ul, 65492ul, 65535ul,
+	54527ul, 43519ul, 32767ul, 21759ul, 11007ul, 255ul, 2752767ul, 5505279ul, 8323327ul, 11141375ul, 13893887ul, 16711935ul, 16711892ul, 16711850ul, 16711807ul, 16711765ul, 16711722ul,
+};
+
 int pam_nocomm(int n, const struct pam_message **query, struct pam_response **resp, void *data) {
 	// PAM responder (responds with the password the user entered)
 	*resp = (struct pam_response *)malloc(sizeof(struct pam_response));
@@ -167,13 +172,28 @@ int main(int argc, char *argv[]) {
 			}
 
 			if(changed) {
-				XClearWindow(display, w);
-				for(int i = 0; i<passwordBufferLength; i++)
+				// Draw current square
+				int i = passwordBufferLength - 1;
+				if(i >= 0) {
+					XSetForeground(display, gc, colors[(7 * i) % (sizeof(colors) / sizeof(colors[0]))]);
+					XFillRectangle(display, w, gc, 20 + i * 40, 20, 20, 20);
+					XFillRectangle(display, w, gc, xwa.width - 20 - i * 40, xwa.height - 40, 20, 20);
+
+					XSetForeground(display, gc, WhitePixel(display, 0));
 					XDrawRectangle(display, w, gc, 20 + i * 40, 20, 20, 20);
-				XSync(display, False);
+					XDrawRectangle(display, w, gc, xwa.width - 20 - i * 40, xwa.height - 40, 20, 20);
+				}
+
+				// Black out next square (to handle backspace)
+				i++;
+				XSetForeground(display, gc, BlackPixel(display, 0));
+				XFillRectangle(display, w, gc, 20 + i * 40 - 1, 19, 22, 22);
+				XFillRectangle(display, w, gc, xwa.width - 20 - i * 40 - 1, xwa.height - 40 - 1, 22, 22);
 			}
 		}
 		passwordBuffer[passwordBufferLength] = 0;
+		XClearWindow(display, w);
+		XSync(display, False);
 
 		// Verify password
 		pam_set_item(pamh, PAM_AUTHTOK, passwordBuffer);
