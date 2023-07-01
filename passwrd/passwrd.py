@@ -132,6 +132,7 @@ def send_string(window, text):#{{{
         key_codes = list(display.keysym_to_keycodes(key_sym))
         if not key_codes:
             continue
+        key_codes.sort(key=lambda x: x[1] & 1)
         key_code, index = key_codes[0]
 
         m_state = 0
