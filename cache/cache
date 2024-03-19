@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+import atexit
+import hashlib
+import json
+import os
+import select
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+
+def copy_then_close(fd_from, fd_to):
+    shutil.copyfileobj(fd_from, fd_to)
+    fd_to.close()
+
+
+cache_root = os.path.expanduser("~/.cache/cache-cmd-helper")
+os.makedirs(cache_root, exist_ok=True)
+
+hash_key = [os.getppid(), os.getcwd(), sys.argv]
+digest = hashlib.sha256(json.dumps(hash_key).encode()).hexdigest()
+
+stdout_cache_file = f"{cache_root}/{digest}.stdout"
+stderr_cache_file = f"{cache_root}/{digest}.stderr"
+
+deadline = time.time() - 3600 * 24
+for fn in os.listdir(cache_root):
+    path = os.path.join(cache_root, fn)
+    if os.stat(path).st_mtime < deadline:
+        os.unlink(path)
+
+if os.path.isfile(stdout_cache_file):
+    stdout = open(stdout_cache_file, "rb")
+    stderr = open(stderr_cache_file, "rb")
+
+    stdout_thread = threading.Thread(target=copy_then_close, args=(stdout, sys.stdout.buffer))
+    stderr_thread = threading.Thread(target=copy_then_close, args=(stderr, sys.stderr.buffer))
+    stdout_thread.start()
+    stderr_thread.start()
+    stdout_thread.join()
+    stderr_thread.join()
+
+    sys.exit(0)
+
+child = subprocess.Popen(sys.argv[1:], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+stdout = open(f"{stdout_cache_file}.tmp", "wb")
+stderr = open(f"{stderr_cache_file}.tmp", "wb")
+fds = [child.stdout.fileno(), child.stderr.fileno()]
+def cleanup():
+    try: os.unlink(f"{stdout_cache_file}.tmp")
+    except: ...
+    try: os.unlink(f"{stderr_cache_file}.tmp")
+    except: ...
+atexit.register(cleanup)
+
+while fds:
+    readable, _, _= select.select(fds, [], [])
+    if child.stdout.fileno() in readable:
+        data = child.stdout.read(10240)
+        stdout.write(data)
+        sys.stdout.buffer.write(data)
+        if not data:
+            fds.remove(child.stdout.fileno())
+            stdout.close()
+    if child.stderr.fileno() in readable:
+        data = child.stderr.read(10240)
+        stderr.write(data)
+        sys.stderr.buffer.write(data)
+        if not data:
+            fds.remove(child.stderr.fileno())
+            stderr.close()
+
+exit_code = child.wait()
+if exit_code == 0:
+    os.rename(f"{stdout_cache_file}.tmp", stdout_cache_file)
+    os.rename(f"{stderr_cache_file}.tmp", stderr_cache_file)
+sys.exit(exit_code)

@@ -33,6 +33,11 @@ Contents:
   A tiny X11 tool running a command every time a bell is rang. I use this
   to flash my notebook's LCD brightness.
 
+* cache
+
+  Cache command output for interactively building pipes. Very simple, does
+  not consider what's input on stdin.
+
 * check_integrity
 
   Basic, non-hack-proof system integrity checker informing root about
