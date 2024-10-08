@@ -83,6 +83,11 @@ Contents:
 
   use $.. or %.. to backreference in the command.
 
+* ipatch
+
+  A simple tool to run "patch" with unified format diffs like "git add -p", that is,
+  with selection of hunks and the ability to edit them.
+
 * iwebd
 
   Monolithic instantaneous httpd and ftpd with support for everything you'd ever

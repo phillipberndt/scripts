@@ -1,0 +1,165 @@
+#!/usr/bin/python3
+#
+# A simple tool to prove a "git add -p" experience, but for "patch"
+#
+import os
+import subprocess
+import sys
+import tempfile
+
+def split_into_hunks(patch):
+    """Split a unified format patch into hunks"""
+    patch = patch.splitlines()
+    while not patch[0].startswith("---"):
+        patch.pop(0)
+    if not patch:
+        raise ValueError("Expecting a patch in unified format")
+    while patch:
+        if patch[0][0] == "-":
+            old_file, new_file, *patch = patch
+            assert new_file.startswith("+++")
+        hunk, *patch = patch
+        assert hunk.startswith("@@")
+        _1, old, new, *_2 = hunk.split()
+        assert old.startswith("-")
+        assert new.startswith("+")
+        old_lines = int(old.split(",")[1])
+        new_lines = int(new.split(",")[1])
+        hunk_data = [old_file, new_file, hunk]
+        while patch and old_lines and new_lines:
+            line, *patch = patch
+            hunk_data.append(line)
+            if line[0] in (" ", "-"):
+                old_lines -= 1
+            if line[0] in (" ", "+"):
+                new_lines -= 1
+        assert old_lines == 0
+        assert new_lines == 0
+        hunk_data.append("")
+        yield "\n".join(hunk_data)
+
+
+def print_colorized(hunk):
+    """Print a colorized diff"""
+    for line in hunk.splitlines():
+        if line.startswith(("---", "+++")):
+            print(f"\033[1m{line}\033[0m")
+        elif line.startswith("@@"):
+            print(f"\033[36m{line}\033[0m")
+        elif line.startswith("+"):
+            print(f"\033[32m{line}\033[0m")
+        elif line.startswith("-"):
+            print(f"\033[31m{line}\033[0m")
+        else:
+            print(line)
+
+
+def apply_shift(hunk, shift):
+    """Shift all line references in a hunk by a given amount"""
+    hunk = hunk.splitlines()
+    assert hunk[2].startswith("@@")
+    hunk_start, old, new, *hunk_end = hunk[2].split()
+    old_start, old_length = old.split(",")
+    new_start, new_length = new.split(",")
+    old_start = int(old_start[1:]) + shift
+    new_start = int(new_start[1:]) + shift
+    hunk[2] = f"{hunk_start} -{old_start},{old_length} +{new_start},{new_length} {' '.join(hunk_end)}"
+    hunk.append("")
+    return "\n".join(hunk)
+
+
+
+def main(argv):
+    try:
+        *args, patch_file = argv[1:]
+    except ValueError:
+        print("ipatch - Interactively apply patches, like `git add -p'", file=sys.stderr)
+        print("Syntax: ipatch [patch arguments] <patch file>", file=sys.stderr)
+        sys.exit(1)
+    if patch_file == "-":
+        patch_file_contents = sys.stdin.read()
+    else:
+        patch_file_contents = open(patch_file).read()
+
+    hunks = split_into_hunks(patch_file_contents)
+    apply_all = False
+    previous_file = None
+    for hunk in hunks:
+        # If the file changed, reset the line number shift
+        current_file = hunk.splitlines()[0]
+        if previous_file != current_file:
+            shift = 0
+            previous_file = current_file
+        # Shift line number references
+        hunk = apply_shift(hunk, shift)
+        # Compute by how much this patch will shift line numbers in later hunks
+        hunk_shift = sum(1 if l.startswith("+") else -1 if l.startswith("-") else 0 for l in hunk.splitlines())
+        # Print the patch
+        print_colorized(hunk)
+        # Ask for which action to take
+        while not apply_all:
+            action = input("\033[1;36mApply this hunk [y,n,q,a,d,e,?]?\033[0m ")
+            if action in "ynqade":
+                break
+            if action == "?":
+                print("y - Apply this hunk")
+                print("n - do not apply this hunk")
+                print("q - quit; do not apply this hunk or any of the remaining ones")
+                print("a - apply this hunk and all later hunks")
+                print("e - manually edit the current hunk")
+        # Take the action
+        if action in ("y", "a"):
+            # Apply the patch
+            subprocess.run(["patch", "--dry-run", *args], input=hunk.encode(), check=True)
+            subprocess.run(["patch", *args], input=hunk.encode(), check=True)
+            shift += hunk_shift
+            if action == "a":
+                apply_all = True
+        elif action == "q":
+            break
+        elif action == "e":
+            # Edit the patch
+            while True:
+                hunk_file = tempfile.NamedTemporaryFile(mode="w+")
+                hunk_file.write("# Manual hunk edit mode -- see bottom for a quick guide.\n")
+                hunk_file.write(hunk)
+                hunk_file.write("\n".join(("", "# ---", "# To remove '-' lines, make them ' ' lines (context).",
+                                          "# To remove '+' lines, delete them.", "# Lines starting with # will be removed,",
+                                          "# If the patch applies cleanly, the edited hunk will immediately be marked for staging.",
+                                          "# If it does not apply cleanly, you will be given an opportunity to",
+                                          "# edit again.  If all lines of the hunk are removed, then the edit is",
+                                          "# aborted and the hunk is left unchanged.",)))
+                hunk_file.flush()
+                subprocess.run([os.environ.get("EDITOR", "vim"), hunk_file.name])
+                hunk_file.seek(0)
+                updated_hunk = hunk_file.read()
+                if not updated_hunk:
+                    break
+
+                # Some postprocessing:
+                updated_hunk = updated_hunk.splitlines()
+                # Strip comments
+                updated_hunk = [l for l in updated_hunk if not l.startswith("#")]
+                # Adjust line numbers
+                updated_hunk_new_file_lines = sum(1 if l.startswith((" ", "+")) else 0 for l in updated_hunk) - 1
+                assert updated_hunk[2].startswith("@@")
+                hunk_start, old, new, *hunk_end = updated_hunk[2].split()
+                new_start, old_new_value = new.split(",")
+                new = f"{new_start},{updated_hunk_new_file_lines}"
+                hunk_shift += updated_hunk_new_file_lines - int(old_new_value)
+                updated_hunk[2] = f"{hunk_start} {old} {new} {' '.join(hunk_end)}"
+                updated_hunk.append("")
+                updated_hunk = "\n".join(updated_hunk)
+
+                # Test if the hunk applies
+                if subprocess.run(["patch", "--dry-run", *args], input=updated_hunk.encode()).returncode == 0:
+                    break
+                input("Press <enter> to try again")
+            if updated_hunk:
+                # Apply the patch
+                subprocess.run(["patch", *args], input=updated_hunk.encode(), check=True)
+                shift += hunk_shift
+
+
+if __name__ == "__main__":
+    main(sys.argv)
