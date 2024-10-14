@@ -1,5 +1,15 @@
+# Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
+# Initialization code that may require console input (password prompts, [y/n]
+# confirmations, etc.) must go above this block; everything else may go below.
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
+# Experiment: Run everything in tmux
+#[ "${TERM#screen}" = "$TERM" -a -z "$TMUX" -a "${-/i}" != "$i" ] && exec tmux
+
 # Load zgen
-DISABLE_AUTO_UPDATE="true"
+#DISABLE_AUTO_UPDATE="true"
 if [ -e "${HOME}/.zgen/init.zsh" ]; then
 	ZGEN_DIR="${HOME}/.zgen"
 	ZSH="${HOME}/.zgen/robbyrussell/oh-my-zsh-master"
@@ -14,12 +24,10 @@ else
 		zgen load zsh-users/zsh-syntax-highlighting
 		zgen load zsh-users/zsh-completions src
 		zgen load zsh-users/zsh-history-substring-search
-		zgen load Tarrasch/zsh-autoenv # .autoenv.zsh USE autostash !!
-		zgen load rimraf/k # k
 		zgen load chrissicool/zsh-256color
 		zgen load greymd/tmux-xpanes
-		zgen oh-my-zsh themes/gentoo
 		zgen load oz/safe-paste
+		zgen load romkatv/powerlevel10k powerlevel10k
 		zgen save
 	fi
 fi
@@ -153,6 +161,29 @@ mktmp() {
 	)
 	rm -rf $TDIR
 }
+tmpunpack() {
+	SOURCE=${1:?}
+	if ! test $SOURCE "=~" :/; then
+		SOURCE=$(readlink -f "$SOURCE")
+		if [ "$?" -ne 0 ]; then
+			echo "$SOURCE not found" >&2
+			return 1
+		fi
+	fi
+	PREFIX=${2:-/tmp}
+	local TDIR
+	TDIR=$PREFIX/tmp-$RANDOM
+	while ! [ -d $TDIR ]; do
+		mkdir -m 0711 $TDIR && break
+		TDIR=$PREFIX/tmp-$RANDOM
+	done
+	echo Entering $TDIR. This directory will be deleted once you exit the subshell.
+	(
+		cd $TDIR
+		unpack $SOURCE && IS_TMP_SUBSHELL=1 zsh
+	)
+	rm -rf $TDIR
+}
 if [ -n "$IS_TMP_SUBSHELL" ]; then
 	export PS1="[tmp] $PS1"
 	[ -e /etc/profile.d/vte.sh ] && source /etc/profile.d/vte.sh # To ensure gnome-terminal notices the new directory
@@ -254,3 +285,8 @@ if [ -d $HOME/.zsh/scripts/ ]; then
 		source $SCRIPT
 	done
 fi
+
+unsetopt beep
+
+# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
+[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
