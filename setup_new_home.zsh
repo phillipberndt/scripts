@@ -160,5 +160,5 @@ tar xzf nvim
 mv -f nvim-linux64 ../_apps/
 cd ..
 rm -rf tmp
-cd ..
 ln -s ../_apps/nvim-linux64/bin/nvim bin/nvim
+cd ..
