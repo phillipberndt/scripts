@@ -3,9 +3,12 @@
 
 # Install Inconsolata
 mkdir -p ~/.local/share/fonts/
-[ -e ~/.local/share/fonts/Inconsolata.otf ] || wget http://www.levien.com/type/myfonts/Inconsolata.otf -O ~/.local/share/fonts/Inconsolata.otf
-gconftool -t string -s /desktop/gnome/interface/monospace_font_name "Inconsolata 11"
-dconf write /org/gnome/desktop/interface/monospace-font-name "'Inconsolata Medium 11'"
+if ! [ -e ~/.local/share/fonts/InconsolataNerdFont-Regular.ttf ]; then
+	wget https://github.com/ryanoasis/nerd-fonts/releases/download/v3.2.1/Inconsolata.zip
+	unzip Inconsolata.zip "*.ttf" -d ~/.local/share/fonts
+	rm -f Inconsolata.zip
+fi
+dconf write /org/gnome/desktop/interface/monospace-font-name "'Inconsolata Nerd Font Regular 13'"
 
 # Install colorscheme for gnome-terminal
 # Based on Base16/Colors
