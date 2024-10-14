@@ -15,6 +15,7 @@ if [ -z "$IS_UPDATE" ]; then
 	echo "That is:"
 	echo " * .local/ is heavily used. Especially, .local/bin is used as a per-user \$PATH."
 	echo " * .vim/ is initialized with my vim repository and .vimrc is placed in \$HOME"
+	echo " * .config/nvim is initialized with my nvim repository"
 	echo " * .zshrc is linked to the version from this repository. Local changes should go into"
 	echo "   your .zsh directory, into an executable file in .zsh/scripts/"
 	echo " * The binaries from this repository will be placed into .local/bin/"
@@ -54,26 +55,13 @@ cd ..
 # Link binaries
 [ -d bin ] || mkdir bin
 cd bin
-for BINARY in gdo/gdo passwrd/passwrd.py unpack/unpack pydoce/pydoce on/on.py pskill/pskill.py sshproxy/sshp.py paxel/paxel.py emoji/emoji.py errno/errno; do
+for BINARY in gdo/gdo passwrd/passwrd.py unpack/unpack pydoce/pydoce on/on.py pskill/pskill.py sshproxy/sshp.py paxel/paxel.py emoji/emoji.py errno/errno cache/cache ipatch/ipatch; do
 	[ -e ${BINARY:t:r} ] || ln -s ../_scripts/$BINARY ${BINARY:t:r}
 done
 cd ..
 
-# Initialize Python virtual environment
-	[ -e get-pip.py ] || wget -O get-pip.py https://bootstrap.pypa.io/get-pip.py
-
-if ! [ -e bin/ipython3 ]; then
-	PIPBIN=pip3
-	if ! which $PIPBIN; then
-		wget -O get-pip.py https://bootstrap.pypa.io/get-pip.py
-		python3 get-pip.py --user
-		rm -f get-pip.py
-		PIPBIN=bin/pip3
-	fi
-	$PIPBIN install ipython requests flask jedi pexpect psutil
-fi
-
-cd ..
+# Initialize Python environment
+pip3 install --user -U ipython requests flask jedi pexpect psutil "python-lsp-server[all]"
 
 # Initialize zsh
 cd $HOME
@@ -82,11 +70,12 @@ if [ -z "$IS_UPDATE" ]; then
 	[ -d .zsh ] && mv .zsh zsh-old
 	mkdir .zsh
 	cd .zsh
-	ln -s ../.local/_scripts/zshrc/{site,zshrc,zgen} .
+	ln -s ../.local/_scripts/zshrc/{site,zshrc,zgen,p10k.zsh} .
 	mkdir scripts
 	ln -s ../.local/_scripts/zshrc/scripts/* scripts/
 	cd ..
 	ln -s .zsh/zshrc .zshrc
+	ln -s .zsh/p10k.zsh .p10k.zsh
 	source .zshrc
 else
 	cd .zsh
@@ -114,6 +103,13 @@ else
 	git pull
 	git submodule update --init
 	cd ..
+fi
+
+# Initialize neovim
+if [ -d ~/.config/nvim ]; then
+	git -C ~/.config/nvim pull
+else
+	git clone ${CLONE_BASE}nvimconfig ~/.config/nvim
 fi
 
 # Initialize or update fzf
@@ -152,3 +148,17 @@ mv -f lf ../bin
 cd ..
 rm -rf tmp
 cd ..
+
+# Initialize or update neovim
+cd .local
+mkdir -p tmp
+cd tmp
+version=$(wget -qO - https://github.com/neovim/neovim/releases  | grep -oE '/v[0-9.]+/' | head -n1)
+wget -O nvim https://github.com/neovim/neovim/releases/download/$version/nvim-linux64.tar.gz
+tar xzf nvim
+[ -d ../_apps ] || mkdir ../_apps
+mv -f nvim-linux64 ../_apps/
+cd ..
+rm -rf tmp
+cd ..
+ln -s ../_apps/nvim-linux64/bin/nvim bin/nvim
