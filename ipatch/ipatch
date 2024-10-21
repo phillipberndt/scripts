@@ -67,9 +67,9 @@ def split_into_hunks(patch, relax_length=False):
 def format_hunk(hunk, colorize=False):
     out = []
     if colorize:
-        out.append(f"\033[31m--- {hunk.old_file}{"\t" if hunk.old_timestamp else ""}{hunk.old_timestamp}\033[0m")
-        out.append(f"\033[32m+++ {hunk.new_file}{"\t" if hunk.new_timestamp else ""}{hunk.new_timestamp}\033[0m")
-        out.append(f"\033[36,1m@@ -{hunk.old_start_line},{hunk.old_length} +{hunk.new_start_line},{hunk.new_length} @@{" " if hunk.context else ""}{hunk.context}\033[0m")
+        out.append(f"\033[31m--- {hunk.old_file}{chr(9) if hunk.old_timestamp else ''}{hunk.old_timestamp}\033[0m")
+        out.append(f"\033[32m+++ {hunk.new_file}{chr(9) if hunk.new_timestamp else ''}{hunk.new_timestamp}\033[0m")
+        out.append(f"\033[36,1m@@ -{hunk.old_start_line},{hunk.old_length} +{hunk.new_start_line},{hunk.new_length} @@{' ' if hunk.context else ''}{hunk.context}\033[0m")
         for line in hunk.diff:
             if line.startswith("+"):
                 out.append(f"\033[32m{line}\033[0m")
@@ -78,9 +78,9 @@ def format_hunk(hunk, colorize=False):
             else:
                 out.append(line)
     else:
-        out.append(f"--- {hunk.old_file}{"\t" if hunk.old_timestamp else ""}{hunk.old_timestamp}")
-        out.append(f"+++ {hunk.new_file}{"\t" if hunk.new_timestamp else ""}{hunk.new_timestamp}")
-        out.append(f"@@ -{hunk.old_start_line},{hunk.old_length} +{hunk.new_start_line},{hunk.new_length} @@{" " if hunk.context else ""}{hunk.context}")
+        out.append(f"--- {hunk.old_file}{chr(9) if hunk.old_timestamp else ''}{hunk.old_timestamp}")
+        out.append(f"+++ {hunk.new_file}{chr(9) if hunk.new_timestamp else ''}{hunk.new_timestamp}")
+        out.append(f"@@ -{hunk.old_start_line},{hunk.old_length} +{hunk.new_start_line},{hunk.new_length} @@{' ' if hunk.context else ''}{hunk.context}")
         for line in hunk.diff:
             out.append(line)
     out.append("")
