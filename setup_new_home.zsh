@@ -117,7 +117,7 @@ cd .local
 mkdir -p tmp
 cd tmp
 version=$(wget -qO - https://github.com/junegunn/fzf/releases  | grep -oE 'fzf-[^"]+-linux_amd64.tar.gz' | cut -d- -f2 | head -n1)
-wget -O fzf https://github.com/junegunn/fzf/releases/download/$version/fzf-$version-linux_amd64.tar.gz
+wget -O fzf https://github.com/junegunn/fzf/releases/download/v$version/fzf-$version-linux_amd64.tar.gz
 tar xzf fzf
 mv -f fzf ../bin
 cd ..
@@ -129,7 +129,7 @@ wget -O ~/.zsh/scripts/fzf.zsh https://raw.githubusercontent.com/junegunn/fzf/ma
 cd .local
 mkdir -p tmp
 cd tmp
-version=$(wget -qO - https://github.com/phillipberndt/iwebd/releases  | grep -oE 'iwebd-[^"]+-linux-amd64.tar.gz' | cut -d- -f2 | head -n1)
+version=$(wget -qO - https://github.com/phillipberndt/iwebd/releases  | grep -oE '/tag/v[0-9.]{5,}' | cut -d/ -f3 | head -n1)
 wget -O iwebd https://github.com/phillipberndt/iwebd/releases/download/$version/iwebd-$version-linux-amd64.tar.gz
 tar xzf iwebd
 mv -f iwebd ../bin
