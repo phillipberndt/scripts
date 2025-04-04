@@ -118,7 +118,7 @@ alias ls="ls --color=auto -h"
 export LESSCOLOR=yes
 
 # Execute vim on ^X
-export EDITOR=vim
+export EDITOR=nvim
 autoload -U edit-command-line
 zle -N edit-command-line
 bindkey '^X' edit-command-line
