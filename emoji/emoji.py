@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.13"
+# dependencies = [
+#     "pygobject",
+#     "python-xlib",
+#     "requests",
+# ]
+# ///
+
 # encoding: utf-8
 #
 # Simple script to let the user select an emoji or other Unicode symbol and
