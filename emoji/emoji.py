@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.13"
 # dependencies = [
@@ -83,15 +83,19 @@ def get_emoji_cache():
 
     if not emoji_cache:
         for url in EMOJI_LIST_URL:
+            print(f"Loading {url}")
             emoji_list = requests.get(url).text
             for match in re.finditer(EMOJI_LIST_REGEXP, emoji_list):
-                key = match.group("codepoint")
+                codepoint = re.sub("&#x([^;]+);", lambda i: chr(int(i[1], 16)), match.group("codepoint"))
+                key = codepoint
                 data = match.groupdict()
+                data["codepoint"] = codepoint
                 data["annotations"] = []
                 data["image"] = base64.b64decode(data["image"][data["image"].find("base64,") + 7:])
                 emoji_cache[key] = data
 
         for url in PDF_SYMBOLS_URL:
+            print(f"Loading {url}")
             symbols_data = requests.get(url).content
             symbols_text = subprocess.Popen(["pdftotext", "-", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE).communicate(symbols_data)[0].decode("utf8")
             for match in re.finditer(PDF_SYMBOLS_REGEXP, symbols_text):
@@ -253,13 +257,8 @@ def get_emoji():
         return False
 
 def set_clipboard(text):
-    def _setter():
-        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
-        clipboard.set_text(text, -1)
-        clipboard.store()
-        Gtk.main_quit()
-    GObject.idle_add(_setter)
-    Gtk.main()
+    with os.popen("wl-copy", "w") as f:
+        f.write(text)
 
 
 if __name__ == "__main__":
