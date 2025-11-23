@@ -60,9 +60,6 @@ for BINARY in gdo/gdo passwrd/passwrd.py unpack/unpack pydoce/pydoce on/on.py ps
 done
 cd ..
 
-# Initialize Python environment
-pip3 install --user -U ipython requests flask jedi pexpect psutil "python-lsp-server[all]"
-
 # Initialize zsh
 cd $HOME
 if [ -z "$IS_UPDATE" ]; then
@@ -153,12 +150,16 @@ cd ..
 cd .local
 mkdir -p tmp
 cd tmp
-version=$(wget -qO - https://github.com/neovim/neovim/releases  | grep -oE '/v[0-9.]+/' | head -n1)
-wget -O nvim https://github.com/neovim/neovim/releases/download/$version/nvim-linux64.tar.gz
+version=$(wget -qO - 'https://github.com/neovim/neovim/releases?page=2'  | grep -oE '/v[0-9.]+/' | head -n1)
+wget -O nvim https://github.com/neovim/neovim/releases/download${version}nvim-linux-x86_64.tar.gz
 tar xzf nvim
 [ -d ../_apps ] || mkdir ../_apps
-mv -f nvim-linux64 ../_apps/
+mv -f nvim-linux-x86_64 ../_apps/
 cd ..
 rm -rf tmp
-ln -s ../_apps/nvim-linux64/bin/nvim bin/nvim
+ln -s ../_apps/nvim-linux-86_64/bin/nvim bin/nvim
 cd ..
+
+# Initialize uv
+[ -e ~/.local/bin/uv ] || ( curl -LsSf https://astral.sh/uv/install.sh | sh )
+ln -s ../_scripts/python_env/{ipython,jupyter} .local/bin

@@ -1,0 +1,3 @@
+#!/bin/sh
+project=$(dirname "$(readlink -f "$0")")
+exec uv run --project "$project" $(basename "$0")

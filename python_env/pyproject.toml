@@ -1,0 +1,14 @@
+[project]
+name = "python-env"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "flask>=3.1.2",
+    "ipython>=9.7.0",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.7",
+    "numpy>=2.3.5",
+    "pexpect>=4.9.0",
+    "requests>=2.32.5",
+    "seaborn>=0.13.2",
+]
