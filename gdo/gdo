@@ -9,7 +9,7 @@ import sys
 import argparse
 import os
 import re
-import pipes
+import shlex
 import subprocess
 
 REMAINDER_HELP = """As parameters, supply a PCRE mattern (or multiple patterns,
@@ -23,8 +23,8 @@ REMAINDER_HELP = """As parameters, supply a PCRE mattern (or multiple patterns,
 
 def main():
     # Command line handling
-    parser = argparse.ArgumentParser(description="What you'd expect from `find -regex '_(\w+)' "
-                                    "-regextype pcre -exec \"foo $1\"'.")
+    parser = argparse.ArgumentParser(description=r"What you'd expect from `find -regex '_(\w+)' "
+                                    r"-regextype pcre -exec \"foo $1\"'.")
     parser.add_argument("-t", dest="test", help="Test. Don't execute the substituted command "
                         "but output it only.", action="store_true")
     parser.add_argument("-d", dest="directory", help="The directory to search in. Defaults "
@@ -142,7 +142,7 @@ def main():
                         print(full_path)
                 else:
                     # Commands given: Build command line,
-                    this_match_command = map(pipes.quote, command_line_builder(matches))
+                    this_match_command = map(shlex.quote, command_line_builder(matches))
                     joined_command = " ".join(this_match_command)
                     if args.test:
                         # either print
