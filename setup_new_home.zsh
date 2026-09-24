@@ -87,21 +87,6 @@ for FILE in .local/_scripts/dotfiles/*; do
 	[ -e .${FILE:t} ] || ln -s $FILE .${FILE:t}
 done
 
-# Initialize vim
-if [ -z "$IS_UPDATE" ]; then
-	[ -e .vimrc ] && mv .vimrc vimrc-old
-	git clone ${CLONE_BASE}vimconfig .vim
-	ln -s .vim/vimrc .vimrc
-	cd .vim
-	./init-after-clone.sh
-	cd ..
-else
-	cd .vim
-	git pull
-	git submodule update --init
-	cd ..
-fi
-
 # Initialize neovim
 if [ -d ~/.config/nvim ]; then
 	git -C ~/.config/nvim pull
