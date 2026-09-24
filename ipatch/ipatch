@@ -20,6 +20,9 @@ def split_into_hunks(patch, relax_length=False):
         raise ValueError("Expecting a patch in unified format")
     while patch:
         # New file, parse header
+        if patch[0].startswith("diff") or patch[0].startswith("index"):
+            patch.pop(0)
+            continue
         if patch[0][0] == "-":
             old_file, new_file, *patch = patch
             assert new_file.startswith("+++")
