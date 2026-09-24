@@ -147,4 +147,4 @@ cd ..
 
 # Initialize uv
 [ -e ~/.local/bin/uv ] || ( curl -LsSf https://astral.sh/uv/install.sh | sh )
-ln -s ../_scripts/python_env/{ipython,jupyter} .local/bin
+ln -s ../_scripts/python_env/{ipython,jupyter,python,python3} .local/bin
