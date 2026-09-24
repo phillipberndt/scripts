@@ -29,7 +29,7 @@ if grep -q pberndt .ssh/id_rsa.pub >/dev/null 2>&1 && git ls-remote git@github.c
 	CLONE_BASE=git@github.com:phillipberndt/
 else
 	echo "Cloning using read-only git connection ..."
-	CLONE_BASE=git://github.com/phillipberndt/
+	CLONE_BASE=https://github.com/phillipberndt/
 fi
 
 # Clone scripts directory
