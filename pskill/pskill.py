@@ -1,351 +1,325 @@
 #!/usr/bin/env python3
-# encoding: utf-8
+# Interactive fuzzy process killer.
+from __future__ import annotations
+
 import fcntl
-import io
 import os
 import re
+import shutil
 import signal
 import struct
 import sys
 import termios
 import time
+from dataclasses import dataclass, field, replace
 
-from itertools import chain
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+CLEAR = "\033[H\033[J"
+ALT_SCREEN_ON = "\033[?1049h"
+ALT_SCREEN_OFF = "\033[?1049l"
+SELECTED_BG = "\033[47m"
 
-try:
-    from psutil import Process, process_iter
-    HAS_PSUTIL = True
-except:
-    HAS_PSUTIL = False
-
-TEXT_RED = "\033[31m"
-TEXT_GREEN = "\033[32m"
-TEXT_YELLOW = "\033[33m"
-TEXT_BOLD = "\033[1m"
-TEXT_HALF_BRIGHT = "\033[2m"
-TEXT_DEFAULT = "\033[0m"
-TEXT_ERASE = "\033[H\033[J"
-TEXT_TO_ALTERNATE = "\033[?1049h"
-TEXT_TO_NORMAL = "\033[?1049l"
-TEXT_BG_GREY = "\033[47m"
+# A SIGTERM is sent, then we poll this many 0.1s ticks for the process to
+# exit before escalating. 50 ticks == 5 seconds.
+GRACE_TICKS = 50
 
 
-class Highlight(str):
-    def __repr__(self):
-        return "*%s*" % (str(self),)
+@dataclass
+class Proc:
+    pid: int
+    cmdline: str
+    uid: int
+    # Spans of the cmdline that matched the query, as (start, end) index
+    # pairs into `cmdline`. Rendered highlighted.
+    matches: list[tuple[int, int]] = field(default_factory=list)
 
 
-if not HAS_PSUTIL:
-    def process_iter():
-        for pid in os.listdir("/proc/"):
-            if pid.isdigit():
-                yield Process(int(pid))
-
-    class Process(object):
-        def __init__(self, pid=None):
-            if not pid:
-                pid = os.getpid()
-            if sys.version < '3' and isinstance(pid, long):
-                pid = int(pid)
-            self.pid = pid
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, type, value, tb):
-            pass
-
-        def oneshot(self):
-            return self
-
-        def cmdline(self):
-            cmd_file = os.path.join("/proc/", str(self.pid), "cmdline")
-            return io.open(cmd_file).read().split("\0")
-
-        def parent(self):
-            try:
-                status_file = os.path.join("/proc/", str(self.pid), "status")
-                pid = int(re.search("PPid:\s+([0-9]+)", open(status_file).read()).group(1))
-                assert pid > 0
-            except:
-                return None
-            return Process(pid)
-
-        def uids(self):
-            status_file = os.path.join("/proc/", str(self.pid), "status")
-            return list(map(int, [x for x in open(status_file).readlines() if x.startswith("Uid:")][0].split()[1:]))
+def _read(path: str) -> str:
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        return fh.read()
 
 
-def ppid_cascade(process=None):
-    if process is None:
-        process = Process()
-    process = process.parent()
-    while process:
-        yield process.pid
-        process = process.parent()
-
-def get_x11_list(for_uid=None):
+def read_proc(pid: int) -> Proc | None:
+    """Build a Proc from /proc/<pid>, or None if it vanished or is unreadable."""
     try:
-        import socket
-        import Xlib.display
-
-        dpy = Xlib.display.Display()
-    except:
-        return
-
-    pid_atom = dpy.get_atom("_NET_WM_PID")
-    cl_atom = dpy.get_atom("_NET_CLIENT_LIST")
-    wm_name_atom = dpy.get_atom("_NET_WM_NAME")
-    hostname = socket.gethostname()
-
-    protected_pids = list(ppid_cascade()) + [ os.getpid() ]
-
-    for wnd_id in dpy.screen().root.get_property(cl_atom, 0, 0, 10000).value:
-        wnd = dpy.create_resource_object("window", wnd_id)
-        host = wnd.get_wm_client_machine()
-        if host != hostname:
-            continue
-        pid = wnd.get_property(pid_atom, 0, 0, 4)
-        if not pid:
-            continue
-        pid = pid.value[0]
-        name = wnd.get_property(wm_name_atom, 0, 0, 10000).value
-
-        if pid in protected_pids:
-            continue
-
-        data = query_process(pid)
-        if data and (for_uid is None or for_uid == 0 or data["owner"] == for_uid):
-            data["cmd_line"] = u"%s [%s]" % (data["cmd_line"], name)
-            yield data
-
-def query_process(process=None):
-    if not isinstance(process, Process):
-        process = Process(process)
-    cmd_line = u" ".join((u'"%s"' % x.replace('"', r'\"') if " " in x else x.replace('"', r'\"') \
-                         for x in process.cmdline()))
-    return {"pid": process.pid, "cmd_line": cmd_line, "owner": process.uids()[0]}
-
-def get_proc_list(for_uid=None):
-    protected_pids = list(ppid_cascade()) + [ os.getpid() ]
-    for process in process_iter():
-        if process.pid in protected_pids:
-            continue
-        if not for_uid or for_uid in process.uids():
-            try:
-                yield query_process(process)
-            except:
-                pass
-
-def get_proc_lists(for_uid=None):
-    return chain(get_proc_list(for_uid), get_x11_list(for_uid))
-
-def fuzzy_search(proc_list, search_str):
-    search_str = search_str.lower()
-    for entry in proc_list:
-        match_str = []
-        start = 0
-        try:
-            cmd_remain = entry["cmd_line"]
-            for word in search_str.split():
-                next_match = cmd_remain.lower().index(word.lower(), start)
-                match_str += (cmd_remain[:next_match], Highlight(word))
-                cmd_remain = cmd_remain[next_match+len(word):]
-            match_str.append(cmd_remain)
-            yield dict(entry, match_str=match_str)
-        except ValueError:
-            continue
-
-def re_search(proc_list, regex):
-    try:
-        for entry in proc_list:
-            match = re.search(regex, entry["cmd_line"], re.I)
-            if match:
-                match_str = (entry["cmd_line"][:match.start()], Highlight(match.group(0)), entry["cmd_line"][match.end():])
-                yield dict(entry, match_str=match_str)
-    except re.error:
-        return
-
-
-def generic_search(proc_list, inp):
-    if inp and inp[0] == "/":
-        try:
-            return re_search(proc_list, inp[1:])
-        except:
-            return []
-    else:
-        return fuzzy_search(proc_list, inp)
-
-def format_output(candidate, width=None, additional_format=""):
-    global_format = u"%s%s" % (TEXT_DEFAULT, additional_format)
-    match_str = []
-    if candidate["owner"] != os.getuid():
-        global_format = u"%s%s" % (TEXT_DEFAULT, TEXT_HALF_BRIGHT)
-    n = 0
-    for part in candidate["match_str"]:
-        if width and n + len(part) > width - 9:
-            match_str.append(part[:width - 9 - n])
-            match_str.append(u"…")
-            break
-        n += len(part)
-        if isinstance(part, Highlight):
-            match_str += (TEXT_RED, part, global_format)
+        raw = _read(f"/proc/{pid}/cmdline")
+        # /proc/<pid>/cmdline is NUL-separated and NUL-terminated. Kernel
+        # threads expose an empty cmdline; fall back to comm in brackets.
+        args = [a for a in raw.split("\0") if a]
+        if args:
+            cmdline = " ".join(f'"{a}"' if " " in a else a for a in args)
         else:
-            match_str.append(part)
-    return u"%s%5d %s" % (global_format, candidate["pid"], u"".join(match_str))
+            cmdline = "[%s]" % _read(f"/proc/{pid}/comm").strip()
+        uid = os.stat(f"/proc/{pid}").st_uid
+    except (FileNotFoundError, ProcessLookupError, PermissionError):
+        return None
+    return Proc(pid=pid, cmdline=cmdline, uid=uid)
 
-def get_term_size():
-    height, width = struct.unpack('hh', fcntl.ioctl(sys.stdin.fileno(), termios.TIOCGWINSZ, '1234'))
-    return width, height
 
-def gentle_kill(candidates):
-    for term_tries in range(2):
-        for entry in candidates:
-            try:
-                os.kill(entry["pid"], signal.SIGTERM)
-            except OSError as e:
-                if e.errno == 3: # No such process
-                    print("%s%s[%-5d]%s Was already gone: %s" % (TEXT_BOLD, TEXT_GREEN, entry["pid"], TEXT_DEFAULT, entry["cmd_line"]))
-                else:
-                    print("%s%s[%-5d]%s Failed to send SIGTERM to %s: %s" % (TEXT_BOLD, TEXT_RED, entry["pid"], TEXT_DEFAULT, entry["cmd_line"], e))
-                candidates.remove(entry)
-
-        alive = 0
-        for i in range(50):
-            if i == 10:
-                if term_tries == 0:
-                    print("%d process(es) still alive despite SIGTERM, giving them 5 seconds to react before sending it again" % len(candidates))
-                else:
-                    print("%d process(es) still alive despite SIGTERM, giving them 5 seconds to react before sending SIGKILL" % len(candidates))
-            time.sleep(.1)
-            alive = 0
-            for entry in candidates:
-                try:
-                    os.kill(entry["pid"], 0)
-                except OSError:
-                    print("%s%s[%-5d]%s Killed %s" % (TEXT_BOLD, TEXT_GREEN, entry["pid"], TEXT_DEFAULT, entry["cmd_line"]))
-                    candidates.remove(entry)
-            if not candidates:
-                break
-        if not candidates:
-            break
-
-    if not candidates:
-        return
-
-    for entry in candidates:
+def ancestor_pids() -> set[int]:
+    """PIDs of this process and all its ancestors, which must never be killed."""
+    protected = set()
+    pid = os.getpid()
+    while pid > 0 and pid not in protected:
+        protected.add(pid)
         try:
-            print("%s%s[%-5d]%s Sending SIGKILL to %s" % (TEXT_BOLD, TEXT_YELLOW, entry["pid"], TEXT_DEFAULT, entry["cmd_line"]))
-            os.kill(entry["pid"], signal.SIGKILL)
-        except OSError:
-            if e.errno == 3: # No such process
-                print("%s%s[%-5d]%s Was already gone: %s" % (TEXT_BOLD, TEXT_GREEN, entry["pid"], TEXT_DEFAULT, entry["cmd_line"]))
-            else:
-                print("%s%s[%-5d]%s Failed to send SIGKILL to %s: %s" % (TEXT_BOLD, TEXT_RED, entry["pid"], TEXT_DEFAULT, entry["cmd_line"], e))
-            candidates.remove(entry)
-
-    for i in range(50):
-        time.sleep(.1)
-        for entry in candidates:
-            try:
-                os.kill(entry["pid"], 0)
-            except OSError:
-                print("%s%s[%-5d]%s Killed %s" % (TEXT_BOLD, TEXT_GREEN, entry["pid"], TEXT_DEFAULT, entry["cmd_line"]))
-                candidates.remove(entry)
-                pass
-        if not candidates:
+            # Field 4 of /proc/<pid>/stat is PPid. comm (field 2) may contain
+            # spaces/parens, so split after the last ")".
+            stat = _read(f"/proc/{pid}/stat")
+            pid = int(stat[stat.rindex(")") + 2:].split()[1])
+        except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError):
             break
+    return protected
 
-    if candidates:
-        for entry in candidates:
-            try:
-                os.kill(entry["pid"], 0)
-                print("%s%s[%-5d]%s Failed to SIGKILL %s" % (TEXT_BOLD, TEXT_RED, entry["pid"], TEXT_DEFAULT, entry["cmd_line"]))
-            except OSError:
-                pass
 
-def main_interactive(proc_list=None, initial_inp=""):
-    if not sys.stdout.isatty() or not sys.stdin.isatty():
-        print("Interactive mode requires a TTY on stdin/stdout")
+def list_procs(for_uid: int | None) -> list[Proc]:
+    protected = ancestor_pids()
+    out = []
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if pid in protected:
+            continue
+        proc = read_proc(pid)
+        if proc is None:
+            continue
+        if for_uid is None or proc.uid == for_uid:
+            out.append(proc)
+    return out
+
+
+def fuzzy_search(procs: list[Proc], query: str) -> list[Proc]:
+    """Match each query word as a substring, left to right, case-insensitive."""
+    words = query.lower().split()
+    results = []
+    for proc in procs:
+        hay = proc.cmdline.lower()
+        pos = 0
+        spans = []
+        for word in words:
+            found = hay.find(word, pos)
+            if found < 0:
+                break
+            spans.append((found, found + len(word)))
+            pos = found + len(word)
+        else:
+            results.append(replace(proc, matches=spans))
+    return results
+
+
+def regex_search(procs: list[Proc], pattern: str) -> list[Proc]:
+    try:
+        rx = re.compile(pattern, re.I)
+    except re.error:
+        return []
+    results = []
+    for proc in procs:
+        m = rx.search(proc.cmdline)
+        if m:
+            results.append(replace(proc, matches=[(m.start(), m.end())]))
+    return results
+
+
+def search(procs: list[Proc], query: str) -> list[Proc]:
+    if query.startswith("/"):
+        return regex_search(procs, query[1:])
+    return fuzzy_search(procs, query)
+
+
+def format_proc(proc: Proc, width: int, highlight_bg: str = "") -> str:
+    base = RESET + (DIM if proc.uid != os.getuid() else highlight_bg)
+    budget = width - 7  # 6 for the pid column, 1 for the gap
+    out = [base]
+    rendered = 0
+    cursor = 0
+    for start, end in proc.matches:
+        for seg, color in ((proc.cmdline[cursor:start], base),
+                            (proc.cmdline[start:end], RED)):
+            if rendered + len(seg) > budget:
+                out.append(color + seg[:budget - rendered] + "…")
+                rendered = budget + 1
+                break
+            out.append(color + seg)
+            rendered += len(seg)
+        else:
+            cursor = end
+            continue
+        break
+    else:
+        tail = proc.cmdline[cursor:]
+        if rendered + len(tail) > budget:
+            tail = tail[:budget - rendered] + "…"
+        out.append(base + tail)
+    out.append(RESET)
+    return f"{base}{proc.pid:5d} {''.join(out)}"
+
+
+def term_size() -> tuple[int, int]:
+    try:
+        packed = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, b"\0" * 8)
+        rows, cols = struct.unpack("hhhh", packed)[:2]
+        if cols and rows:
+            return cols, rows
+    except OSError:
+        pass
+    size = shutil.get_terminal_size((80, 24))
+    return size.columns, size.lines
+
+
+def _poll_exits(targets: list[Proc], ticks: int) -> None:
+    """Poll up to `ticks` 0.1s intervals, printing and dropping exited targets."""
+    for _ in range(ticks):
+        if not targets:
+            return
+        time.sleep(0.1)
+        for proc in list(targets):
+            if not pid_alive(proc.pid):
+                print(f"{BOLD}{GREEN}[{proc.pid:-5d}]{RESET} Killed {proc.cmdline}")
+                targets.remove(proc)
+
+
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    # Signal 0 succeeds on zombies (exited but not yet reaped by their
+    # parent). Treat those as dead so kill reporting is accurate even when
+    # a target happens to be our own child.
+    try:
+        stat = _read(f"/proc/{pid}/stat")
+        state = stat[stat.rindex(")") + 2:].split()[0]
+        return state != "Z"
+    except (FileNotFoundError, ProcessLookupError, ValueError, IndexError):
+        return False
+
+
+def gentle_kill(targets: list[Proc]) -> None:
+    targets = list(targets)
+    if not targets:
         return
 
-    proc_list = proc_list or tuple(get_proc_lists(os.getuid()))
-    inp = initial_inp
+    for attempt in range(2):
+        for proc in list(targets):
+            try:
+                os.kill(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                print(f"{BOLD}{GREEN}[{proc.pid:-5d}]{RESET} Was already gone: {proc.cmdline}")
+                targets.remove(proc)
+            except OSError as e:
+                print(f"{BOLD}{RED}[{proc.pid:-5d}]{RESET} Failed to send SIGTERM to {proc.cmdline}: {e}")
+                targets.remove(proc)
 
-    sys.stdout.write("".join((TEXT_TO_ALTERNATE, TEXT_BOLD, ">>> ", TEXT_DEFAULT)))
-    opts = termios.tcgetattr(sys.stdin.fileno())
-    copts = termios.tcgetattr(sys.stdin.fileno())
-    copts[3] = copts[3] & ~termios.ICANON & ~termios.ECHO
-    termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, copts)
-    candidates = []
+        if not targets:
+            return
+        tail = "sending it again" if attempt == 0 else "sending SIGKILL"
+        print(f"{len(targets)} process(es) still alive after SIGTERM, "
+              f"waiting {GRACE_TICKS // 10}s before {tail}")
+        _poll_exits(targets, GRACE_TICKS)
+        if not targets:
+            return
+
+    for proc in list(targets):
+        try:
+            print(f"{BOLD}{YELLOW}[{proc.pid:-5d}]{RESET} Sending SIGKILL to {proc.cmdline}")
+            os.kill(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            print(f"{BOLD}{GREEN}[{proc.pid:-5d}]{RESET} Was already gone: {proc.cmdline}")
+            targets.remove(proc)
+        except OSError as e:
+            print(f"{BOLD}{RED}[{proc.pid:-5d}]{RESET} Failed to send SIGKILL to {proc.cmdline}: {e}")
+            targets.remove(proc)
+
+    _poll_exits(targets, GRACE_TICKS)
+    for proc in targets:
+        if pid_alive(proc.pid):
+            print(f"{BOLD}{RED}[{proc.pid:-5d}]{RESET} Failed to SIGKILL {proc.cmdline}")
+
+
+def run_ui(procs: list[Proc], initial: str = "") -> list[Proc]:
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        print("Interactive mode requires a TTY on stdin/stdout")
+        return []
+
+    query = initial
+    selected = -1
+    chosen: list[Proc] = []
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+    raw = termios.tcgetattr(fd)
+    raw[3] &= ~termios.ICANON & ~termios.ECHO
+    termios.tcsetattr(fd, termios.TCSANOW, raw)
+    sys.stdout.write(ALT_SCREEN_ON)
     try:
-        cand_text = ""
-        selected = -1
         while True:
-            cand_text = []
-            candidates = []
-            width, height = get_term_size()
-            if inp:
-                candidates = list(generic_search(proc_list, inp))
-                if selected >= min(len(candidates), height - 3):
-                    selected = min(len(candidates) - 1, height - 4)
-                for n, candidate in enumerate(candidates):
-                    cand_text.append(format_output(candidate, width, TEXT_BG_GREY if n == selected else ""))
-                    if n == height - 4:
-                        break
-            cand_text = "\n".join(cand_text)
+            width, height = term_size()
+            max_rows = max(height - 2, 1)
+            candidates = search(procs, query) if query else []
+            if selected >= min(len(candidates), max_rows):
+                selected = min(len(candidates), max_rows) - 1
 
-            sys.stdout.write("".join((TEXT_DEFAULT, TEXT_ERASE, TEXT_BOLD, ">>> ", TEXT_DEFAULT,
-                                      inp if sys.version >= '3' else inp.encode(sys.getfilesystemencoding()),
-                                      "\n", cand_text,
-                                      "\033[%d;%dH" % (1, 5 + len(inp)))))
+            lines = [
+                format_proc(c, width, SELECTED_BG if i == selected else "")
+                for i, c in enumerate(candidates[:max_rows])
+            ]
+            sys.stdout.write(
+                RESET + CLEAR + BOLD + ">>> " + RESET + query + "\n"
+                + "\n".join(lines)
+                + f"\033[1;{5 + len(query)}H"
+            )
             sys.stdout.flush()
 
-            if hasattr(sys.stdin, "buffer"):
-                char = sys.stdin.buffer.read1(10).decode(sys.getfilesystemencoding())
-            else:
-                char = os.read(sys.stdin.fileno(), 10).decode(sys.getfilesystemencoding())
-            if char == "\x7f":
-                if inp:
-                    inp = inp[:-1]
-                selected = -1
-            elif char == "\x1b":
-                candidates = []
+            char = os.read(fd, 16).decode(sys.getfilesystemencoding(), "replace")
+            if char in ("\n", "\r"):
+                if selected > -1 and selected < len(candidates):
+                    chosen = [candidates[selected]]
+                else:
+                    chosen = candidates
                 break
-            elif char[0] == "\x1b":
-                # Escape sequence
-                if char == "\x1b[A" and selected > -1: # Up
-                    selected -= 1
-                elif char == "\x1b[B": # Down
-                    selected += 1
-                pass
-            elif char == "\n" or char == "\r":
-                break
-            else:
+            if char == "\x7f":  # Backspace
+                query = query[:-1]
                 selected = -1
-                inp += char
-
+            elif char == "\x1b":  # Bare Escape: abort
+                break
+            elif char == "\x1b[A":  # Up
+                selected = max(selected - 1, -1)
+            elif char == "\x1b[B":  # Down
+                selected += 1
+            elif char.startswith("\x1b"):
+                pass  # ignore other escape sequences
+            elif char.isprintable():
+                query += char
+                selected = -1
     except KeyboardInterrupt:
-        inp = ""
-        candidates = []
+        chosen = []
     finally:
-        termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, opts)
-        sys.stdout.write(TEXT_TO_NORMAL)
+        termios.tcsetattr(fd, termios.TCSANOW, saved)
+        sys.stdout.write(ALT_SCREEN_OFF)
         sys.stdout.flush()
+    return chosen
 
-    if selected > -1:
-        candidates = candidates[selected:selected+1]
 
-    gentle_kill(candidates)
-
-if __name__ == '__main__':
-    if len(sys.argv) > 1:
-        inp = " ".join(sys.argv[1:])
-        proc_list = tuple(get_proc_lists(os.getuid()))
-        candidates = list(generic_search(proc_list, inp))
+def main(argv: list[str]) -> int:
+    procs = list_procs(os.getuid())
+    if len(argv) > 1:
+        query = " ".join(argv[1:])
+        candidates = search(procs, query)
         if len(candidates) < 2:
             gentle_kill(candidates)
         else:
-            main_interactive(proc_list, inp)
+            gentle_kill(run_ui(procs, query))
     else:
-        main_interactive()
+        gentle_kill(run_ui(procs))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
